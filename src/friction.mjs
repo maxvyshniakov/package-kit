@@ -114,20 +114,34 @@ export function buildEvent(fields, { cwd = process.cwd(), env = process.env, now
   };
 }
 
-/** The journal line of an event: compact JSON, its detail shortened once when the line is longer than the limit. */
-export function eventLine(event) {
-  const line = JSON.stringify(event);
-  if (line.length <= LINE_LIMIT) return line;
-  return JSON.stringify({ ...event, detail: event.detail.slice(0, Math.max(0, event.detail.length - (line.length - LINE_LIMIT))) });
+/**
+ * An event as the contract's write rule hands it to the journal: every schema field in field order (a missing one
+ * null), then the fields the schema does not name, and a string detail cut to DETAIL_LIMIT. A non-object is left as is.
+ */
+export function journalEvent(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return event;
+  const ready = Object.fromEntries(SCHEMA.fields.map(({ name }) => [name, event[name] ?? null]));
+  for (const [key, value] of Object.entries(event)) if (!(key in ready)) ready[key] = value;
+  if (typeof ready.detail === "string") ready.detail = ready.detail.slice(0, DETAIL_LIMIT);
+  return ready;
 }
 
-/** Append one valid event as one line; returns the file, or null when the journal is off. */
+/** The journal line of an event: compact JSON in schema order, its detail shortened once when the line is too long. */
+export function eventLine(event) {
+  const ready = journalEvent(event);
+  const line = JSON.stringify(ready);
+  if (line.length <= LINE_LIMIT || typeof ready.detail !== "string") return line;
+  return JSON.stringify({ ...ready, detail: ready.detail.slice(0, Math.max(0, ready.detail.length - (line.length - LINE_LIMIT))) });
+}
+
+/** Append one event as one line; returns the file, or null when the journal is off. An invalid event throws. */
 export function appendEvent(event, env = process.env) {
-  const problems = validateEvent(event);
+  const ready = journalEvent(event);
+  const problems = validateEvent(ready);
   if (problems.length) throw new Error(`friction event: ${problems.join("; ")}`);
   const file = journalPath(env);
   if (!file) return null;
-  const line = eventLine(event);
+  const line = eventLine(ready);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   // One write with O_APPEND: concurrent writers never interleave a line.
   const fd = fs.openSync(file, "a", 0o600);

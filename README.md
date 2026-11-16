@@ -203,7 +203,7 @@ went through lane landing still needs separate publication reconciliation.
 [Full command reference](docs/reference.md#commands) · [Story screenshots](docs/reference.md#story-screenshots) · [Friction journal](docs/reference.md#friction-journal)
 
 The friction journal's format is data: [`friction-contract.json`](friction-contract.json), shipped in the package,
-holds its schema, build, fingerprint and redaction rules and golden cases, and is the format's source. A writer in
+holds its schema, build, write, fingerprint and redaction rules and golden cases, and is the format's source. A writer in
 another language keeps a pinned copy with its SHA-256 (as `hooks/reference-transaction` pins Lanefather's hook) and
 runs the cases against itself.
 

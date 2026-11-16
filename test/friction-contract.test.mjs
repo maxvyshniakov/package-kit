@@ -4,22 +4,23 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
-  buildEvent, DETAIL_LIMIT, eventLine, fingerprint, FRICTION_CONTRACT, FRICTION_KINDS, FRICTION_SCHEMA, redactNote,
-  validateEvent,
+  appendEvent, buildEvent, DETAIL_LIMIT, eventLine, fingerprint, FRICTION_CONTRACT, FRICTION_KINDS, FRICTION_SCHEMA, journalEvent,
+  redactNote, validateEvent,
 } from "../src/friction.mjs";
 import { kitRoot } from "./fixtures.mjs";
 
 const contract = JSON.parse(fs.readFileSync(path.join(kitRoot, "friction-contract.json"), "utf8"));
 
 // One record per schema version: the SHA-256 of the canonical schema part and how many
-// build and validate cases the contract had when the version was cut. A change to the
+// build, write and validate cases the contract had when the version was cut. A change to the
 // schema part fails here until it bumps schema.version, adds cases and records both.
 const SCHEMA_RECORD = {
-  1: { sha256: "026f8bd386ebb338374e8a1b9da7c2a79eff2d0a34920394baf7846ebc36cd0b", cases: 37 },
+  1: { sha256: "026f8bd386ebb338374e8a1b9da7c2a79eff2d0a34920394baf7846ebc36cd0b", cases: 63 },
 };
 
 /** JSON with object keys sorted at every level: the hash ignores key order and whitespace. */
@@ -31,7 +32,7 @@ function canonical(value) {
   return JSON.stringify(value);
 }
 const schemaHash = schema => crypto.createHash("sha256").update(canonical(schema)).digest("hex");
-const formatCases = () => contract.cases.build.length + contract.cases.validate.length;
+const formatCases = () => contract.cases.build.length + contract.cases.write.length + contract.cases.validate.length;
 
 test("friction.mjs takes the schema version, kinds and limits from the contract", () => {
   assert.deepEqual(FRICTION_CONTRACT, contract);
@@ -50,6 +51,21 @@ for (const golden of contract.cases.build) {
     const event = buildEvent(golden.fields, { cwd: golden.cwd, env: golden.env, now: new Date(golden.now) });
     assert.equal(eventLine(event), golden.line);
     assert.deepEqual(validateEvent(JSON.parse(golden.line)), [], "a built line is valid");
+  });
+}
+
+for (const golden of contract.cases.write) {
+  test(`write case: ${golden.name}`, () => {
+    const journal = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-friction-write-")), "events.jsonl");
+    if (golden.problems) {
+      assert.deepEqual(validateEvent(journalEvent(golden.event)), golden.problems);
+      assert.throws(() => appendEvent(golden.event, { FRICTION_JOURNAL: journal }), /friction event:/, "a refusal is an error, not silence");
+      assert.equal(fs.existsSync(journal), false);
+    } else {
+      assert.equal(eventLine(golden.event), golden.line);
+      appendEvent(golden.event, { FRICTION_JOURNAL: journal });
+      assert.equal(fs.readFileSync(journal, "utf8"), `${golden.line}\n`);
+    }
   });
 }
 
@@ -77,13 +93,13 @@ test("the schema part is recorded for its version: a change bumps the version an
   assert.deepEqual(versions, Array.from({ length: version }, (_, index) => index + 1),
     `schema.version ${version}: record every version from 1 to ${version} in SCHEMA_RECORD`);
   assert.equal(schemaHash(contract.schema), SCHEMA_RECORD[version].sha256,
-    "the contract's schema part changed: bump schema.version, add build and validate cases for the change, "
+    "the contract's schema part changed: bump schema.version, add build, write and validate cases for the change, "
     + `and record the new version's hash (${schemaHash(contract.schema)}) and case count in SCHEMA_RECORD`);
   assert.ok(formatCases() >= SCHEMA_RECORD[version].cases,
-    `cases are only added: version ${version} was recorded with ${SCHEMA_RECORD[version].cases} build and validate cases`);
+    `cases are only added: version ${version} was recorded with ${SCHEMA_RECORD[version].cases} build, write and validate cases`);
   for (const later of versions.slice(1)) {
     assert.ok(SCHEMA_RECORD[later].cases > SCHEMA_RECORD[later - 1].cases,
-      `schema version ${later} must add build or validate cases to version ${later - 1}'s`);
+      `schema version ${later} must add build, write or validate cases to version ${later - 1}'s`);
   }
 });
 
