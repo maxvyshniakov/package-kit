@@ -4,6 +4,8 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-16
+
 ### Added
 
 - `friction-contract.json`, shipped in the package and exported as `@maxvyshniakov/repo-kit/friction-contract.json`, is the friction journal format's source (repo-kit#19): schema version, fields with their types and required ones, kinds, limits, validation order and line encoding, how an event is built, the fingerprint rule and the export redaction rules, with golden build, validate, fingerprint and redact cases. `src/friction.mjs` reads its constants from it and runs every case in the tests; a change to the schema part fails the tests until it bumps the schema version and adds cases. A writer in another language keeps a pinned copy with its SHA-256. The friction module also exports `journalEvent` (the contract's write rule), `eventLine` (the journal line of an event) and `fingerprint(...parts)` (the contract's fingerprint rule). Built events and their lines are unchanged. An event handed to `appendEvent` as is is now written in schema order (missing fields as null, unnamed ones after them) with a long detail cut to 500 characters instead of refused; an invalid one still throws.
