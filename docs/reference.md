@@ -268,6 +268,20 @@ transcript scanners (mastack). Everything stays on the machine.
 - Schema version 1 (`v: 1`). Readers skip lines of other versions and count
   them; unknown extra fields are kept and ignored. Renaming or retyping a field
   is version 2.
+- The format's source is [`friction-contract.json`](../friction-contract.json),
+  shipped in the package (`@maxvyshniakov/repo-kit/friction-contract.json`): the
+  schema (fields, kinds, limits, validation order and line encoding), how an
+  event is built, the fingerprint rule (`fingerprint(...parts)`: the first 16 hex
+  digits of SHA-256 over the parts joined by NUL) and the export redaction rules,
+  plus golden cases: build (fields, working directory, environment and time to the
+  exact line), validate (line to its problems), fingerprint and redact. The table
+  below summarises it. A change to its `schema` part needs a new `schema.version`
+  and new cases; repo-kit's tests run every case and hold a hash of the schema
+  part per version.
+- A writer in another language (Mastack's Python hook) keeps a pinned copy with
+  its SHA-256, changed only by copying the file and updating the hash, as repo-kit
+  pins Lanefather's `hooks/reference-transaction`, and runs every writer case
+  (build, validate, fingerprint) against itself.
 
 | Field | Required | Meaning |
 |---|---|---|

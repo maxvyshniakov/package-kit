@@ -35,6 +35,10 @@ export default {
         const lane = run("node_modules/.bin/repo-kit-lane", ["--help"], { cwd: consumerDir });
         if (lane.status === 0 && lane.stdout.includes("Usage: repo-kit-lane")) ok("node_modules/.bin/repo-kit-lane runs");
         else fail(`node_modules/.bin/repo-kit-lane --help exited ${lane.status}:\n${lane.stdout}${lane.stderr}`);
+        // The friction module reads the contract it ships with when it loads.
+        const friction = run("node_modules/.bin/repo-kit", ["friction", "help"], { cwd: consumerDir });
+        if (friction.status === 0 && friction.stdout.includes("repo-kit friction log")) ok("repo-kit friction loads its shipped contract");
+        else fail(`repo-kit friction help exited ${friction.status}:\n${friction.stdout}${friction.stderr}`);
       },
     ],
   },

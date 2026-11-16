@@ -20,11 +20,13 @@
     "./publish": "./src/publish.mjs",
     "./release": "./src/release.mjs",
     "./shoot": "./src/shoot.mjs",
+    "./friction-contract.json": "./friction-contract.json",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "hooks",
+    "friction-contract.json",
     "README.md",
     "docs/reference.md",
     "CHANGELOG.md",

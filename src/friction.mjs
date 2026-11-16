@@ -4,21 +4,37 @@
 // Writers: `repo-kit friction log`, sid-kit-lint, the mastack hook and scanners.
 // `report` ranks it; `export` writes a redacted bundle a person can send.
 // Nothing here opens a network connection. See docs/reference.md#friction-journal.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const FRICTION_SCHEMA = 1;
-export const FRICTION_KINDS = ["lint-finding", "selector-reach-in", "type-error", "owner-correction", "misuse",
-  "vendored-patch", "review-finding", "note"];
-export const DETAIL_LIMIT = 500;
-const LINE_LIMIT = 4000;
-const STRING_FIELDS = ["project", "package", "kind", "component", "rule", "detail", "session", "source", "why", "file", "fingerprint"];
+// The format is data: friction-contract.json (schema, build, fingerprint and redaction
+// rules, golden cases), shipped with the package. Writers in other languages keep a
+// pinned copy of it and run its cases.
+export const FRICTION_CONTRACT = JSON.parse(fs.readFileSync(new URL("../friction-contract.json", import.meta.url), "utf8"));
+const { schema: SCHEMA, build: BUILD, fingerprint: FINGERPRINT, redaction: REDACTION } = FRICTION_CONTRACT;
+const regex = ({ pattern, flags }) => new RegExp(pattern, flags);
+
+export const FRICTION_SCHEMA = SCHEMA.version;
+export const FRICTION_KINDS = SCHEMA.kinds;
+export const DETAIL_LIMIT = SCHEMA.limits.detail;
+const LINE_LIMIT = SCHEMA.limits.line;
+const TS_PATTERN = regex(SCHEMA.fields.find(field => field.name === "ts"));
+// Required text fields ("X is required") and the fields that are a string or null ("X must be a string or null").
+const REQUIRED_TEXT = SCHEMA.fields.filter(field => field.required && field.type === "string" && !field.format && !field.oneOf)
+  .map(field => field.name);
+const STRING_FIELDS = SCHEMA.fields.filter(field => field.type === "string" && !field.format).map(field => field.name);
 // Kinds whose detail is a person's or an agent's words, not a tool's message:
 // the only ones `export --notes` takes a redacted note from.
-const NOTE_KINDS = new Set(["owner-correction", "misuse", "review-finding", "note"]);
-const IDENTIFIER = /^[A-Za-z_$][\w$.\-/]{0,79}$/;
-const PACKAGE_NAME = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/;
+const NOTE_KINDS = new Set(REDACTION.noteKinds);
+const IDENTIFIER = regex(REDACTION.identifier);
+const PACKAGE_NAME = regex(REDACTION.packageName);
+const NOTE = {
+  ...REDACTION.note, remove: REDACTION.note.remove.map(regex), dropNoteIf: regex(REDACTION.note.dropNoteIf),
+  split: regex(REDACTION.note.split), dropWordIf: REDACTION.note.dropWordIf.map(regex), trimWord: regex(REDACTION.note.trimWord),
+  keepWordIf: regex(REDACTION.note.keepWordIf),
+};
 
 /** The journal file: FRICTION_JOURNAL, else $XDG_STATE_HOME/friction, else ~/.local/state/friction. "off" is none. */
 export function journalPath(env = process.env) {
@@ -50,17 +66,24 @@ export function projectName(cwd = process.cwd()) {
 }
 
 export function sessionId(env = process.env) {
-  return env.FRICTION_SESSION || env.CLAUDE_CODE_SESSION_ID || env.CODEX_SESSION_ID || null;
+  for (const name of BUILD.session.env) if (env[name]) return env[name];
+  return null;
+}
+
+/** The contract's fingerprint of a fact: sha256 of the parts joined by NUL, first 16 hex digits. */
+export function fingerprint(...parts) {
+  return crypto.createHash(FINGERPRINT.algorithm).update(parts.map(String).join(FINGERPRINT.separator), FINGERPRINT.encoding)
+    .digest(FINGERPRINT.digest).slice(0, FINGERPRINT.length);
 }
 
 export function validateEvent(event) {
   const problems = [];
   if (!event || typeof event !== "object" || Array.isArray(event)) return ["an event is a JSON object"];
   if (event.v !== FRICTION_SCHEMA) problems.push(`v must be ${FRICTION_SCHEMA}`);
-  if (typeof event.ts !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(event.ts) || Number.isNaN(Date.parse(event.ts))) {
+  if (typeof event.ts !== "string" || !TS_PATTERN.test(event.ts) || Number.isNaN(Date.parse(event.ts))) {
     problems.push("ts must be an ISO 8601 time");
   }
-  for (const field of ["project", "package", "source"]) {
+  for (const field of REQUIRED_TEXT) {
     if (typeof event[field] !== "string" || !event[field].trim()) problems.push(`${field} is required`);
   }
   if (!FRICTION_KINDS.includes(event.kind)) problems.push(`kind must be one of ${FRICTION_KINDS.join(", ")}`);
@@ -91,14 +114,20 @@ export function buildEvent(fields, { cwd = process.cwd(), env = process.env, now
   };
 }
 
+/** The journal line of an event: compact JSON, its detail shortened once when the line is longer than the limit. */
+export function eventLine(event) {
+  const line = JSON.stringify(event);
+  if (line.length <= LINE_LIMIT) return line;
+  return JSON.stringify({ ...event, detail: event.detail.slice(0, Math.max(0, event.detail.length - (line.length - LINE_LIMIT))) });
+}
+
 /** Append one valid event as one line; returns the file, or null when the journal is off. */
 export function appendEvent(event, env = process.env) {
   const problems = validateEvent(event);
   if (problems.length) throw new Error(`friction event: ${problems.join("; ")}`);
   const file = journalPath(env);
   if (!file) return null;
-  let line = JSON.stringify(event);
-  if (line.length > LINE_LIMIT) line = JSON.stringify({ ...event, detail: event.detail.slice(0, Math.max(0, event.detail.length - (line.length - LINE_LIMIT))) });
+  const line = eventLine(event);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   // One write with O_APPEND: concurrent writers never interleave a line.
   const fd = fs.openSync(file, "a", 0o600);
@@ -208,15 +237,15 @@ export function formatReport(result, skipped = { unreadable: 0, version: 0 }) {
 
 /** A note a person may share: no code, paths, URLs, addresses or long numbers; at most 12 words. */
 export function redactNote(text) {
-  let note = String(text ?? "").replace(/`[^`]*`/g, " ");
-  note = note.replace(/\bhttps?:\/\/\S+/gi, " ").replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, " ");
+  let note = String(text ?? "");
+  for (const pattern of NOTE.remove) note = note.replace(pattern, " ");
   // A note with code punctuation left outside backticks is code: drop it whole.
-  if (/[{}<>=;$\\|]|=>|\(\)/.test(note)) return "";
-  const words = note.split(/\s+/)
-    .filter(word => word && !/[/~]/.test(word) && !/\d{5,}|[0-9a-f]{8,}/i.test(word))
-    .map(word => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
-    .filter(word => word && /^[\p{L}\p{N}'’-]+$/u.test(word));
-  return words.slice(0, 12).join(" ");
+  if (NOTE.dropNoteIf.test(note)) return "";
+  const words = note.split(NOTE.split)
+    .filter(word => word && !NOTE.dropWordIf.some(pattern => pattern.test(word)))
+    .map(word => word.replace(NOTE.trimWord, ""))
+    .filter(word => word && NOTE.keepWordIf.test(word));
+  return words.slice(0, NOTE.maxWords).join(" ");
 }
 
 function paraphrase({ kind, component, rule }) {
