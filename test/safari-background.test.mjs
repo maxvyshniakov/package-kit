@@ -105,8 +105,10 @@ test('waitForFunction serializes readiness rather than a circular React DOM node
     const node = {}; node.__reactFiber = { stateNode: node };
     // The page-beacon boundary JSON-serializes results. React-owned DOM nodes
     // carry enumerable fiber references, so returning the node itself fails.
-    f.proxy.until = async js => JSON.parse(JSON.stringify(Function('document', js)({ querySelector: () => node })));
+    f.proxy.until = async js => JSON.parse(JSON.stringify(await Function('document', `return (async () => { ${js} })()`)({ querySelector: () => node })));
     assert.equal(await page.waitForFunction(() => document.querySelector('#story')), true);
     assert.equal(await page.waitForFunction(() => false), false);
+    assert.equal(await page.waitForFunction(async () => false), false);
+    assert.equal(await page.waitForFunction(async () => document.querySelector('#story')), true);
   } finally { await browser.close(); }
 });
