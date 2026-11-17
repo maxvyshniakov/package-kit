@@ -69,7 +69,7 @@ export async function launchSafari(overrides = {}) {
         },
         async reload() { const before = await evaluate(() => performance.timeOrigin); proxy.send('location.reload()'); await guarded(() => proxy.until(`return performance.timeOrigin !== ${before} && document.readyState === 'complete'`, 60000, 'reload')); },
         async setViewportSize(size) { desired = size; if (ownedPid) await resize(); },
-        async waitForFunction(fn, arg, { timeout = 30000 } = {}) { return guarded(() => proxy.until(`return (${fn})(${JSON.stringify(arg)})`, timeout, 'page condition')); },
+        async waitForFunction(fn, arg, { timeout = 30000 } = {}) { return guarded(() => proxy.until(`return Boolean((${fn})(${JSON.stringify(arg)}))`, timeout, 'page condition')); },
         locator: selector => ({ count: () => evaluate(s => document.querySelectorAll(s).length, selector) }),
         async screenshot({ path }) {
           const size = await evaluate(() => [innerWidth, innerHeight]);

@@ -96,3 +96,17 @@ test('watcher readiness is a barrier before any native browser open', async () =
   await (await browser.newPage()).goto('http://localhost:6010/one');
   assert.ok(f.events.some(e => e[0] === 'open-background')); await browser.close();
 });
+
+test('waitForFunction serializes readiness rather than a circular React DOM node', async () => {
+  const f = fake(); const browser = await launchSafari(f.system);
+  try {
+    const page = await browser.newPage();
+    await page.goto('http://localhost:6010/iframe.html');
+    const node = {}; node.__reactFiber = { stateNode: node };
+    // The page-beacon boundary JSON-serializes results. React-owned DOM nodes
+    // carry enumerable fiber references, so returning the node itself fails.
+    f.proxy.until = async js => JSON.parse(JSON.stringify(Function('document', js)({ querySelector: () => node })));
+    assert.equal(await page.waitForFunction(() => document.querySelector('#story')), true);
+    assert.equal(await page.waitForFunction(() => false), false);
+  } finally { await browser.close(); }
+});
