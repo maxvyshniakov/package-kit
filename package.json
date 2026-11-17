@@ -18,6 +18,7 @@
     "./packed-consumer": "./src/packed-consumer.mjs",
     "./perf-budget": "./src/perf-budget.mjs",
     "./publish": "./src/publish.mjs",
+    "./publish-prerelease": "./src/publish-prerelease.mjs",
     "./release": "./src/release.mjs",
     "./shoot": "./src/shoot.mjs",
     "./friction-contract.json": "./friction-contract.json",
