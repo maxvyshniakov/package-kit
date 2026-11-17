@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { compareVersions, nextVersion, parseChangelog, parseVersion } from './changelog.mjs';
 import { changelogPackages } from './check-changelogs.mjs';
+import { chooseVersionSource } from './version-source.mjs';
 import { resolveToken } from './token.mjs';
 import { runTlsGate } from './tls.mjs';
 import { publishArguments, registryUrl } from './publish.mjs';
@@ -43,16 +44,20 @@ export async function runPrerelease(config,options, { tls = runTlsGate, tokenSou
  // Revalidate programmatic callers as well as the CLI.
  const {preid,tag,dryRun}=parsePrereleaseOptions(['--prerelease',options.preid,'--dist-tag',options.tag,...(options.dryRun?['--dry-run']:[])]);
  const {root}=config;
+ const {quickStart,versionSource}=config.changelog ?? {};
  const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
  if(git('status','--porcelain')) throw new Error('Not publishing: the working tree has uncommitted changes');
+ if(chooseVersionSource(root,versionSource)!=='package.json') throw new Error('Prerelease publishing uploads npm packages, not a configured Python version source');
  const head=git('rev-parse','HEAD');
  if(!tls({requireRegistry:true})) throw new Error('Not publishing: the TLS gate failed');
  const {token}=tokenSource();
  if(!token) throw new Error('GITHUB_TOKEN is unset and gh has no token');
  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'repo-kit-prerelease-'));
  try {
-  archiveCommit({root,commit:head,into:scratch});
-  const [pkg,...others]=changelogPackages(scratch,{quickStart:config.changelog.quickStart});
+  const checkout=path.join(scratch,'source');
+  fs.mkdirSync(checkout);
+  archiveCommit({root,commit:head,into:checkout});
+  const [pkg,...others]=changelogPackages(checkout,{quickStart,versionSource});
   if(!pkg||others.length) throw new Error('Prerelease publishing requires exactly one npm package');
   const manifestPath=path.join(pkg.dir,'package.json');
   if(!fs.existsSync(manifestPath)) throw new Error('Prerelease publishing requires package.json');
@@ -63,18 +68,29 @@ export async function runPrerelease(config,options, { tls = runTlsGate, tokenSou
    return response.json();
   };
   const before=await metadata();
+  const latest=before['dist-tags']?.latest;
+  if(!dryRun && (!/^\d+\.\d+\.\d+$/.test(latest??'') || !before.versions?.[latest])) {
+   throw new Error('Prerelease upload requires an established stable latest version; first publication may assign latest even with an explicit tag');
+  }
   const {unreleased,errors}=parseChangelog(fs.readFileSync(path.join(pkg.dir,'CHANGELOG.md'),'utf8'));
   if(errors.length)throw new Error(`Malformed changelog: ${errors.join('; ')}`);
   const {version}=prereleaseVersion({current:pkg.version,published:Object.keys(before.versions??{}),unreleased,preid});
   const env={...process.env,GITHUB_TOKEN:token};
-  execute('bun',['install','--frozen-lockfile','--ignore-scripts','--no-progress'],{cwd:scratch,stdio:'inherit',env});
+  execute('bun',['install','--frozen-lockfile','--ignore-scripts','--no-progress'],{cwd:checkout,stdio:'inherit',env});
   const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
   fs.writeFileSync(manifestPath,JSON.stringify({...manifest,version,gitHead:head},null,2)+'\n');
-  const bunfig=path.join(scratch,'bunfig.toml');
-  execute('bun',[...publishArguments(fs.existsSync(bunfig)?bunfig:undefined),`--tag=${tag}`,...(dryRun?['--dry-run']:[])],{cwd:pkg.dir,stdio:'inherit',env});
+  const archive=path.join(scratch,'package.tgz');
+  execute('bun',['pm','pack',`--filename=${archive}`],{cwd:pkg.dir,stdio:'inherit',env});
+  const packed=JSON.parse(execFileSync('tar',['-xOf',archive,'package/package.json'],{encoding:'utf8'}));
+  if(packed.name!==pkg.name || packed.version!==version || packed.gitHead!==head) {
+   throw new Error('Packed package identity or provenance differs from the captured prerelease');
+  }
+  const bunfig=path.join(checkout,'bunfig.toml');
+  execute('bun',[...publishArguments(fs.existsSync(bunfig)?bunfig:undefined),archive,`--tag=${tag}`,...(dryRun?['--dry-run']:[])],{cwd:pkg.dir,stdio:'inherit',env});
   if(!dryRun) {
    const after=await metadata();
-   if(!after.versions?.[version])throw new Error(`Publish exited cleanly but registry does not serve ${version}`);
+   if(after.versions?.[version]?.gitHead!==head)throw new Error(`Registry does not serve ${version} with the captured provenance`);
+   if(after['dist-tags']?.[tag]!==version)throw new Error(`Registry dist-tag ${tag} does not name ${version}`);
    if(after['dist-tags']?.latest!==before['dist-tags']?.latest)throw new Error('Registry latest tag changed during prerelease publication; inspect concurrent publication before changing tags');
   }
   console.log(`${dryRun?'Dry run':'Published'}: ${pkg.name}@${version}, dist-tag ${tag}, gitHead ${head}`);

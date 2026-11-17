@@ -4,7 +4,7 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
-- Add explicit prerelease publication from a captured commit, with a non-latest dist-tag and dry-run support; keep stable release gates and Git refs unchanged.
+- Add explicit prerelease publication from a captured commit, with a non-latest dist-tag and dry-run support. Validate packed provenance before upload, refuse first uploads that could assign `latest`, and preserve configured package eligibility; keep stable release gates and Git refs unchanged.
 
 ## 0.8.0 - 2026-11-16
 

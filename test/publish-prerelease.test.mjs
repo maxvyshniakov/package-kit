@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { isolatedGitEnv, tempRepository, workspaceFiles } from './fixtures.mjs';
+import { isolatedGitEnv, tempRepository, workspaceFiles, rootPackageFiles, pyprojectFiles } from './fixtures.mjs';
 import { parsePrereleaseOptions, prereleaseVersion, archiveCommit, runPrerelease } from '../src/publish-prerelease.mjs';
 
 test('prerelease requires explicit non-latest tag and rejects ambiguous release options', () => {
@@ -49,12 +49,14 @@ test('publication uploads the archived manifest with immutable provenance and an
   git('add','.');git('commit','-qm','captured');const sha=git('rev-parse','HEAD');
   const code=await runPrerelease({root,changelog:{}},{preid:'integration',tag:'integration'}, {
    tls:()=>{calls.push('tls');return true;},tokenSource:()=>({token:'fixture'}),
-   request:async()=>{calls.push('registry');return {ok:true,json:async()=>({versions:published?{'0.3.0-integration.1':{}}:{},'dist-tags':{latest:'0.2.0'}})};},
+   request:async()=>{calls.push('registry');return {ok:true,json:async()=>({versions:{'0.2.0':{},...(published?{'0.3.0-integration.1':{gitHead:sha}}:{})},'dist-tags':{latest:'0.2.0',...(published?{integration:'0.3.0-integration.1'}:{})}})};},
    execute:(cmd,args,opts)=>{
     assert.equal(cmd,'bun');calls.push(args[0]);assert.notEqual(opts.cwd,root);
     if(args[0]==='install') {
       assert.ok(args.includes('--ignore-scripts'));assert.equal(JSON.parse(readFileSync(path.join(opts.cwd,'package.json'),'utf8')).version,'0.2.0');
       writeFileSync(path.join(root,'later'),'not in snapshot');git('add','later');git('commit','-qm','advance HEAD');
+    } else if(args[0]==='pm') {
+      execFileSync(cmd,args,{...opts,stdio:'pipe'});
     } else {
       assert.ok(args.includes('--tag=integration'));
       uploaded=JSON.parse(readFileSync(path.join(opts.cwd,'package.json'),'utf8'));published=true;
@@ -63,7 +65,7 @@ test('publication uploads the archived manifest with immutable provenance and an
   });
   assert.equal(code,0);assert.equal(uploaded.gitHead,sha);assert.equal(uploaded.version,'0.3.0-integration.1');
   assert.equal(JSON.parse(readFileSync(path.join(root,'package.json'),'utf8')).version,'0.2.0');
-  assert.equal(git('tag'),'');assert.deepEqual(calls,['tls','registry','install','publish','registry']);
+  assert.equal(git('tag'),'');assert.deepEqual(calls,['tls','registry','install','pm','publish','registry']);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
 
@@ -79,6 +81,7 @@ test('workspace dry run packs only the selected package and cleans its snapshot'
    execute:(cmd,args,opts)=>{
     executions.push(args);
     if(args[0]==='install') snapshot=opts.cwd;
+    else if(args[0]==='pm') execFileSync(cmd,args,{...opts,stdio:'pipe'});
     else {
      assert.equal(opts.cwd,path.join(snapshot,'packages/example'));
      assert.ok(args.includes('--dry-run'));
@@ -89,8 +92,28 @@ test('workspace dry run packs only the selected package and cleans its snapshot'
    },
   });
   assert.equal(result,0);
-  assert.equal(executions.length,2);
+  assert.equal(executions.length,3);
   assert.throws(()=>readFileSync(path.join(snapshot,'package.json')), {code:'ENOENT'});
   assert.equal(repo.git('status','--porcelain'),'');
+ } finally {repo.cleanup();}
+});
+
+
+test('new packages cannot acquire latest through their first prerelease', async () => {
+ const repo=tempRepository(rootPackageFiles(), {git:true});
+ try {
+  await assert.rejects(runPrerelease({root:repo.root,changelog:{}}, {preid:'integration',tag:'integration'}, {
+   tls:()=>true, tokenSource:()=>({token:'fixture'}), request:async()=>({status:404}),
+   execute:()=>{throw new Error('upload or install must not start');},
+  }), /established stable latest/);
+ } finally {repo.cleanup();}
+});
+
+test('configured Python version source rejects a tooling npm manifest before credentials', async () => {
+ const repo=tempRepository(pyprojectFiles({'package.json':{name:'tooling',version:'1.0.0'}}), {git:true});
+ try {
+  await assert.rejects(runPrerelease({root:repo.root,changelog:{versionSource:'pyproject.toml'}}, {preid:'integration',tag:'integration'}, {
+   tls:()=>{throw new Error('TLS must not run');}, tokenSource:()=>{throw new Error('credentials must not be read');},
+  }), /npm packages/);
  } finally {repo.cleanup();}
 });
