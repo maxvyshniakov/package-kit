@@ -23,7 +23,7 @@
 //   channel). Playwright's own patched Firefox does not start on macOS 27 ("Could
 //   not find profile folder"), and it is not the Firefox users run.
 // - webkit: Playwright's WebKit. It renders like Safari but is not Safari.
-// - safari: Safari Technology Preview over its own safaridriver (./safari.mjs).
+// - safari: real Safari Technology Preview through the background transport (./safari.mjs).
 //
 // Playwright is the repository's own devDependency, loaded from its root: the
 // kit stays dependency-free and Safari needs no Playwright at all.
@@ -284,7 +284,7 @@ export async function shootStories(options, { launch, fetch: get = fetch, sleep 
               broken.push(`${path.basename(file)} (${error})`);
               continue;
             }
-            // Safari's WebDriver screenshot covers the viewport only; it ignores fullPage and clip.
+            // Background Safari captures its viewport from the owned native window.
             const shot = { path: file, fullPage: options.full };
             if (options.full && browserName !== "safari") {
               const height = await page.evaluate(pageHeight);
