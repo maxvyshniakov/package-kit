@@ -36,15 +36,20 @@ case "open":
     else { fputs("Background STP launch did not return a new owned process\n", stderr); failed = true }
     finished = true
   }
-  while !finished { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+  let deadline = Date().addingTimeInterval(20)
+  while !finished && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+  guard finished else { fputs("Background STP launch completion timed out; ownership unavailable\n", stderr); exit(1) }
   if failed { exit(1) }
 case "place":
   let pid = Int32(args[2])!; _ = owned(pid)
   var windows: CFTypeRef?
   AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXWindowsAttribute as CFString, &windows)
   guard let window = (windows as? [AXUIElement])?.first else { exit(1) }
-  var point = CGPoint(x: 0, y: NSScreen.screens[0].frame.height - NSScreen.screens[0].visibleFrame.maxY)
+  let screen = NSScreen.screens[0]
   var size = CGSize(width: Double(args[3])!, height: Double(args[4])!)
+  // Match the canonical harness: leave a 20-point band below maximized owner windows.
+  let bottom = min(screen.frame.height, screen.frame.height - screen.visibleFrame.minY + 20)
+  var point = CGPoint(x: 80, y: bottom - size.height)
   let moved = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, AXValueCreate(.cgPoint, &point)!)
   let sized = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, AXValueCreate(.cgSize, &size)!)
   guard moved == .success && sized == .success else { exit(1) }; out(true)
@@ -68,6 +73,12 @@ case "quit":
   let app = owned(Int32(args[2])!); _ = app.terminate()
   let end = Date().addingTimeInterval(5)
   while !app.isTerminated && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
-  if !app.isTerminated { _ = app.forceTerminate() }; out(true)
+  if !app.isTerminated {
+    guard app.forceTerminate() else { fputs("STP force termination refused\n", stderr); exit(1) }
+    let forcedEnd = Date().addingTimeInterval(5)
+    while !app.isTerminated && Date() < forcedEnd { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+  }
+  guard app.isTerminated else { fputs("STP did not exit after termination\n", stderr); exit(1) }
+  out(true)
 default: exit(1)
 }

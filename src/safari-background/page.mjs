@@ -15,7 +15,9 @@ const hopHeaders = new Set(["content-encoding", "content-length", "transfer-enco
 export async function startPage(upstream) {
   const token = randomUUID();
 
-  let queue = [], nextId = 1;
+  let queue = [], nextId = 1, closed = false;
+  const closedError = new Error("Safari page bridge closed");
+  const checkOpen = () => { if (closed) throw closedError; };
   const waiting = new Map();
   const readBody = request => new Promise(resolve => {
     const chunks = [];
@@ -65,6 +67,7 @@ export async function startPage(upstream) {
 
   /** Runs `js` (an async function body) in the page; rejects on a page error or after `timeoutMs`. */
   function run(js, timeoutMs = 15_000) {
+    if (closed) return Promise.reject(closedError);
     const id = nextId++;
     queue.push({ id, js });
     return new Promise((resolve, reject) => {
@@ -76,18 +79,20 @@ export async function startPage(upstream) {
     });
   }
   /** Queues a script that ends the page (a navigation): no answer is awaited. */
-  const send = js => { queue.push({ id: nextId++, js }); };
+  const send = js => { checkOpen(); queue.push({ id: nextId++, js }); };
   /** Polls `js` until it returns something truthy. */
   async function until(js, timeoutMs, what, explain = "return { href: location.href, state: document.readyState, visibility: document.visibilityState }") {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
-      const value = await run(js, 5_000).catch(() => null);
+      checkOpen();
+      const value = await run(js, 5_000).catch(error => { checkOpen(); return null; });
       if (value) return value;
       await new Promise(resolve => setTimeout(resolve, 250));
     }
+    checkOpen();
     const state = await run(explain, 5_000).catch(error => String(error));
     throw new Error(`timed out waiting for ${what}: ${JSON.stringify(state)}`);
   }
-  const close = () => new Promise(resolve => { for (const complete of waiting.values()) complete({ error: "Safari page bridge closed" }); waiting.clear(); queue = []; server.closeAllConnections?.(); server.close(() => resolve()); });
+  const close = () => new Promise(resolve => { closed = true; for (const complete of waiting.values()) complete({ error: "Safari page bridge closed" }); waiting.clear(); queue = []; server.closeAllConnections?.(); server.close(() => resolve()); });
   return { origin, token, run, send, until, close };
 }

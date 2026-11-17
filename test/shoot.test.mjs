@@ -384,3 +384,13 @@ test("SIGTERM or SIGHUP closes the open browser before the run exits", async () 
     assert.deepEqual(events, ["close", `exit ${128 + os.constants.signals[signal]}`], signal);
   }
 });
+
+test('final browser cleanup failure prevents reporting screenshot success', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-close-'));
+  const fake = fakeBrowsers();
+  try {
+    await assert.rejects(shootStories({ filters: ['button'], themes: ['light'], widths: [1280], browsers: ['safari'], out, full: false, url: 'http://sb' }, {
+      fetch: fetchIndex, sleep: async () => {}, log: () => {}, launch: name => ({ ...fake.launch(name), close: async () => { throw new Error('focus guard during cleanup'); } }),
+    }), /focus guard during cleanup/);
+  } finally { fs.rmSync(out, { recursive: true, force: true }); }
+});

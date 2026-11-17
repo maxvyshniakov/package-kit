@@ -8,7 +8,7 @@ export async function launchSafari(overrides = {}) {
   const system = { ...safariSystem, ...overrides };
   const lock = system.lock();
   if (lock.held) throw new Error(`Safari background run busy (owner ${lock.held})`);
-  let watcher, proxy, ownedPid, starting, closing, failure, origin;
+  let watcher, proxy, ownedPid, starting, closing, failure, origin, syncBefore;
   let rejectAbort;
   const aborted = new Promise((_, reject) => { rejectAbort = reject; });
   aborted.catch(() => {});
@@ -17,10 +17,14 @@ export async function launchSafari(overrides = {}) {
   const close = () => closing ??= (async () => {
     try {
       await starting?.catch(() => {});
-      if (ownedPid) await system.quit(ownedPid);
+      if (ownedPid) {
+        await system.quit(ownedPid);
+        await system.sweepSync(syncBefore);
+      }
     } finally {
-      try { await proxy?.close(); } finally { try { watcher?.close(); } finally { lock.release(); } }
+      try { await proxy?.close(); } finally { try { await watcher?.close(); } finally { lock.release(); } }
     }
+    if (failure) throw failure;
   })();
   const onFront = front => {
     if (front.bundle === STP || (ownedPid && front.pid === ownedPid)) {
@@ -31,6 +35,7 @@ export async function launchSafari(overrides = {}) {
   try {
     await system.preflight();
     if (system.pids().length) throw new Error('Safari Technology Preview is busy; leave the existing instance alone');
+    syncBefore = system.syncPids();
     onFront(system.front()); check();
     watcher = system.watch(onFront, error => {
       failure ??= error; rejectAbort(failure); void close().catch(() => {});
@@ -72,6 +77,7 @@ export async function launchSafari(overrides = {}) {
         async waitForFunction(fn, arg, { timeout = 30000 } = {}) { return guarded(() => proxy.until(`return Boolean(await (${fn})(${JSON.stringify(arg)}))`, timeout, 'page condition')); },
         locator: selector => ({ count: () => evaluate(s => document.querySelectorAll(s).length, selector) }),
         async screenshot({ path }) {
+          if (!await evaluate(() => document.visibilityState === "visible")) throw new Error("Safari page is hidden: its window may be fully covered");
           const size = await evaluate(() => [innerWidth, innerHeight]);
           await guarded(() => system.capture(ownedPid, path, size));
         },

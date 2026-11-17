@@ -514,11 +514,10 @@ Safari uses the background route extracted from Data Grid's real-STP harness: a 
 non-activating `NSWorkspace` launch (the native `open -g` equivalent), a tokenized local page bridge, Accessibility window sizing, window capture and
 continuous frontmost monitoring. It does not start WebDriver or activate another app afterward.
 An already running STP instance is left alone and reported busy. The run closes only its owned
-PID, page bridge and watcher; the lock is shared with existing real-STP checks.
+PID, page bridge and watcher; it also sweeps newly started Safari sync services while preserving the pre-run baseline. The lock is shared with existing real-STP checks. Launch is asynchronous and bounded; cleanup confirms process exit before succeeding.
 
 STP, Swift command-line tools, and existing Accessibility/Screen Recording permissions are
-required. Missing permissions fail without requesting a prompt. Keep the window visible behind
-the owner's apps: hiding or minimising it stops rendering. A focus-guard failure aborts the run;
+required. Missing permissions fail without requesting a prompt. Placement keeps a 20-point band below maximized owner windows; capture checks page visibility. Hiding, minimising or fully covering the window stops rendering. A focus-guard failure aborts the run;
 it is not a passed screenshot. A viewport width Safari cannot provide fails instead of writing a
 mislabelled image; a height the display cannot fit warns. This transport's native runtime
 acceptance must include frontmost monitoring, viewport cropping and cleanup; mocked tests alone

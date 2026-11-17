@@ -237,15 +237,16 @@ export async function shootStories(options, { launch, fetch: get = fetch, sleep 
     // A run stopped by SIGTERM or SIGHUP (one runLeased forwards, say) closes its browser
     // first, also one still launching: Safari's driver and automation window would outlive
     // it and keep the next run busy. One close serves the signal and the run's own end; a
-    // close that hangs gives up after 10 s, and a second signal exits at once.
+    // close that hangs is bounded; Safari also needs its pending launch and owned exit to settle. A second signal exits at once.
+    const closeTimeout = browserName === "safari" ? 45000 : 10000;
     let browser = null, closing = null, stopping = null;
-    const close = () => (closing ??= Promise.resolve().then(() => browser?.close()).catch(() => {}));
+    const close = () => (closing ??= Promise.resolve().then(() => browser?.close()));
     const stop = signal => {
       const code = 128 + os.constants.signals[signal];
       if (stopping) return exit(code);
       stopping = signal;
       if (!browser) return; // the launch below closes it once it resolves
-      Promise.race([close(), new Promise(resolve => setTimeout(resolve, 10000).unref?.())]).finally(() => exit(code));
+      Promise.race([close(), new Promise(resolve => setTimeout(resolve, closeTimeout).unref?.())]).catch(error => warn(String(error))).finally(() => exit(code));
     };
     const onTerm = () => stop("SIGTERM"), onHup = () => stop("SIGHUP");
     signals.on("SIGTERM", onTerm);
@@ -258,7 +259,7 @@ export async function shootStories(options, { launch, fetch: get = fetch, sleep 
       throw error;
     }
     if (stopping) {
-      await Promise.race([close(), new Promise(resolve => setTimeout(resolve, 10000).unref?.())]);
+      await Promise.race([close(), new Promise(resolve => setTimeout(resolve, closeTimeout).unref?.())]);
       return exit(128 + os.constants.signals[stopping]);
     }
     try {

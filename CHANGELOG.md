@@ -4,7 +4,7 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
-- Safari story screenshots use the existing background STP launch/bridge pattern instead of WebDriver and focus handback. Runs share a lock with the canonical harness, monitor focus, refuse a pre-existing STP instance, and clean up only their own resources. Native runtime acceptance remains pending before release.
+- Safari story screenshots use the existing background STP launch/bridge pattern instead of WebDriver and focus handback. Runs share a lock with the canonical harness, monitor focus, refuse a pre-existing STP instance, and clean up only their own resources. A bounded native run verified viewport capture, no observed STP activation and owned-process cleanup. Lifecycle hardening also propagates finalization focus failures, cancels closed page polling, preserves background window visibility and sweeps newly started sync services; that hardening awaits renewed native acceptance before release.
 
 ## 0.8.0 - 2026-11-16
 

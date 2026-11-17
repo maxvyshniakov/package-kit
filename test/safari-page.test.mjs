@@ -22,3 +22,13 @@ test('local page bridge injects its token, isolates commands and closes pending 
     await proxy.close(); await rejected;
   } finally { await proxy.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); }
 });
+
+test('closing the bridge cancels polling and rejects new commands immediately', async () => {
+  const proxy = await startPage('http://127.0.0.1:1');
+  const polling = proxy.until('return false', 50, 'condition');
+  const rejected = assert.rejects(polling, /bridge closed/);
+  await proxy.close();
+  await rejected;
+  await assert.rejects(proxy.run('return 1'), /bridge closed/);
+  assert.throws(() => proxy.send('return 1'), /bridge closed/);
+});

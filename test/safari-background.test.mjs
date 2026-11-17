@@ -9,6 +9,7 @@ function fake() {
     // Old launcher must fail at its mocked foreground boundary, never run Safari.
     exists: () => true, freePort: async () => 9001, spawn: () => { throw new Error('foreground WebDriver spawn'); },
     preflight: async () => events.push(['preflight']), lock: () => ({ release: () => events.push(['unlock']) }),
+    syncPids: () => new Set(), sweepSync: async () => {},
     pids: () => [], front: () => front,
     watch: fn => { onFront = fn; return { ready: Promise.resolve(), close: () => events.push(['watch-close']) }; },
     startProxy: async origin => (events.push(['proxy', origin]), proxy),
@@ -48,7 +49,7 @@ test('focus guard aborts and closes only its own Safari; owner app switches are 
   await page.evaluate(() => true);
   f.foreground({ pid: 77, bundle: 'com.apple.SafariTechnologyPreview' });
   await assert.rejects(page.evaluate(() => true), /focus/);
-  await browser.close(); await browser.close();
+  await assert.rejects(browser.close(), /focus/); await assert.rejects(browser.close(), /focus/);
   assert.equal(f.events.filter(e => e[0] === 'quit').length, 1);
   assert.deepEqual(f.events.find(e => e[0] === 'quit'), ['quit', 77]);
 });
@@ -72,14 +73,14 @@ test('focus abort during launch waits for ownership before cleanup', async () =>
   f.foreground({ pid: 77, bundle: 'com.apple.SafariTechnologyPreview' });
   finish(77);
   await assert.rejects(navigation, /focus/);
-  await browser.close();
+  await assert.rejects(browser.close(), /focus/);
   assert.deepEqual(f.events.filter(e => e[0] === 'quit'), [['quit', 77]]);
 });
 
 test('native launch boundary requests a non-activating owned process, never WebDriver', async () => {
   const { createSafariSystem } = await import('../src/safari-background/system.mjs');
   const calls = [];
-  const system = createSafariSystem({ exec: () => assert.fail('no direct process spawn'), native: (...args) => { calls.push(args); return 77; } });
+  const system = createSafariSystem({ exec: () => assert.fail('no direct process spawn'), native: () => assert.fail('launch must be asynchronous'), asyncNative: async args => { calls.push(args); return 77; } });
   assert.equal(await system.open('http://127.0.0.1:9000/iframe.html'), 77);
   assert.deepEqual(calls, [['open', 'http://127.0.0.1:9000/iframe.html']]);
 });
@@ -111,4 +112,54 @@ test('waitForFunction serializes readiness rather than a circular React DOM node
     assert.equal(await page.waitForFunction(async () => false), false);
     assert.equal(await page.waitForFunction(async () => document.querySelector('#story')), true);
   } finally { await browser.close(); }
+});
+
+test('focus violation during finalization rejects close after owned cleanup', async () => {
+  const f = fake();
+  f.system.quit = async pid => { f.events.push(['quit', pid]); f.foreground({ pid, bundle: 'com.apple.SafariTechnologyPreview' }); };
+  const browser = await launchSafari(f.system);
+  await (await browser.newPage()).goto('http://localhost:6010/one');
+  await assert.rejects(browser.close(), /focus guard/);
+  assert.ok(f.events.some(event => event[0] === 'unlock'));
+});
+
+test('screenshot refuses a hidden page before capturing stale pixels', async () => {
+  const f = fake(); const browser = await launchSafari(f.system);
+  const page = await browser.newPage();
+  await page.goto('http://localhost:6010/one');
+  const original = f.proxy.run;
+  f.proxy.run = js => js.includes('visibilityState') ? Promise.resolve(false) : original(js);
+  await assert.rejects(page.screenshot({ path: '/unused' }), /hidden|covered/);
+  assert.ok(!f.events.some(event => event[0] === 'capture'));
+  await browser.close();
+});
+
+test('sync service baseline is preserved and swept before releasing the lock', async () => {
+  const f = fake(); const baseline = new Set(['11']);
+  f.system.syncPids = () => baseline;
+  f.system.sweepSync = async before => { assert.equal(before, baseline); f.events.push(['sweep']); };
+  const browser = await launchSafari(f.system);
+  await (await browser.newPage()).goto('http://localhost:6010/one');
+  await browser.close();
+  assert.deepEqual(f.events.filter(event => ['quit', 'sweep', 'unlock'].includes(event[0])).map(event => event[0]), ['quit', 'sweep', 'unlock']);
+});
+
+test('native async boundary is bounded and propagates failed confirmed termination', async () => {
+  const { nativeAsync, createSafariSystem } = await import('../src/safari-background/system.mjs');
+  let callback;
+  const pending = nativeAsync(['open', 'local'], { binary: '/mock', execute: (bin, args, options, done) => {
+    assert.equal(bin, '/mock'); assert.deepEqual(args, ['open', 'local']);
+    assert.equal(options.timeout, 30000); callback = done;
+  } });
+  callback(null, '77'); assert.equal(await pending, 77);
+  const system = createSafariSystem({ asyncNative: async args => { assert.deepEqual(args, ['quit', 77]); throw new Error('STP did not exit'); } });
+  await assert.rejects(system.quit(77), /did not exit/);
+});
+
+test('sync cleanup retains baseline processes and sweeps one service relaunch', async () => {
+  const { createSafariSystem } = await import('../src/safari-background/system.mjs');
+  const lists = ['11 22', '11 33', '11', '11'], killed = [];
+  const system = createSafariSystem({ list: () => ({ stdout: lists.shift() }), kill: pid => killed.push(pid), sleep: async () => {} });
+  await system.sweepSync(new Set(['11']));
+  assert.deepEqual(killed, [22, 33]);
 });
