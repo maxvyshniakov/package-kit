@@ -25,7 +25,7 @@ const USAGE = `Usage: repo-kit <command>
                                    the local release gate on a commit (default HEAD); records its commit status
   release-gate --mode              print release.gate: local or ci
   ci-gate                          in a workflow: whether a job that needs the checks runs (REPO_KIT_NEEDS)
-  publish [--resume]
+  publish [--resume] | publish --prerelease PREID --dist-tag TAG [--dry-run]
   notify                           request publish.notify's workflows again
   tls                              the Bun TLS gate
   friction <log|report|export>     the local agent friction journal (repo-kit friction help)
@@ -175,6 +175,11 @@ export async function main([command, ...args]) {
       return runCiGate(config);
     }
     case "publish": {
+      if (args.some(arg => arg === "--prerelease" || arg.startsWith("--prerelease=") || arg === "--dist-tag" || arg.startsWith("--dist-tag=") || arg === "--dry-run")) {
+        const { parsePrereleaseOptions, runPrerelease } = await import("./publish-prerelease.mjs");
+        return runPrerelease(config, parsePrereleaseOptions(args));
+      }
+      if (args.some(arg => arg !== "--resume")) throw new Error("Unknown publish option; use --prerelease PREID --dist-tag TAG for integration publication");
       const { runPublish } = await import("./publish.mjs");
       return runPublish(config, { resume: args.includes("--resume") });
     }

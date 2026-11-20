@@ -931,3 +931,24 @@ When Lanefather's canonical hook changes:
 1. copy it here;
 2. update the hash;
 3. release.
+
+## Integration prereleases
+
+`repo-kit publish --prerelease integration --dist-tag integration` publishes the
+captured full HEAD SHA from a temporary Git archive. It requires a clean tree
+and exactly one npm package. It does not require the stable release gate,
+change checkout versions, create Git tags, push refs, or notify consumers.
+The TLS gate still runs before authenticated registry requests.
+
+The explicit dist-tag must not be `latest`. Uploading requires an existing stable
+`latest` version because a first publication can assign `latest` even when a
+different tag was requested. Dry-run remains available for a new package. The next prerelease number follows
+the matching identifier on the registry; its base is the next minor after the
+newest stable version, or the next major for a breaking changelog entry at
+1.0.0 and above. `--dry-run` installs and packs without uploading, including the package’s prepack hooks.
+The runner packs once, validates the archived package name, version and `gitHead`,
+and uploads that exact tarball without rerunning lifecycle hooks. A configured
+Python version source is refused even when tooling supplies a package.json.
+Project policy still owns authorization and any integration-branch restriction.
+The programmatic `publish-prerelease` export supplies the same runner and
+version/archive helpers so consumer scripts need not duplicate token or publish code.

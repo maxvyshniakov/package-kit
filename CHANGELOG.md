@@ -11,6 +11,7 @@ Versions and release rules: [README.md](README.md#versioning).
 - Local verified-tree check reuse: on a clean committed Git checkout, passed checks are cached per `(HEAD^{tree}, platform, step command)` under the repository's shared Git common dir and reused on repeat runs (only when all dependents of a producer are also reusable, so artifact-producing steps still run when a dependent must run). Pass `--no-reuse` or `REPO_KIT_NO_REUSE=1` to bypass.
 - Yield between checks under a `--yieldable` Slotfather lease (`SLOTFATHER_YIELD`): `verify` drains running steps, calls `slotfather yield`, and resumes once slots are regained, while stripping `SLOTFATHER_YIELD` from child step environments.
 - `@maxvyshniakov/repo-kit/plan` (and top-level exports `planChecks`, `planSmoke`, `changedPaths`, `createMatcher`).
+- Add explicit prerelease publication from a captured commit, with a non-latest dist-tag and dry-run support (repo-kit#20). Validate packed provenance before upload, refuse first uploads that could assign `latest`, and preserve configured package eligibility; keep stable release gates and Git refs unchanged.
 
 ### Changed
 
