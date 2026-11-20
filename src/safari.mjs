@@ -68,8 +68,12 @@ export async function launchSafari(overrides = {}) {
               ownedPid = await system.open(proxy.origin + target.pathname + target.search); check();
             })();
             await guarded(() => starting);
-          } else proxy.send(`location.href = ${JSON.stringify(proxy.origin + target.pathname + target.search)};`);
-          await guarded(() => proxy.until(`return location.pathname + location.search === ${JSON.stringify(target.pathname + target.search)} && document.readyState === 'complete'`, 60000, 'navigation'));
+            await guarded(() => proxy.until(`return location.pathname + location.search === ${JSON.stringify(target.pathname + target.search)} && document.readyState === 'complete'`, 60000, 'navigation'));
+          } else {
+            const before = await evaluate(() => performance.timeOrigin);
+            proxy.send(`location.href = ${JSON.stringify(proxy.origin + target.pathname + target.search)};`);
+            await guarded(() => proxy.until(`return performance.timeOrigin !== ${JSON.stringify(before)} && location.pathname + location.search === ${JSON.stringify(target.pathname + target.search)} && document.readyState === 'complete'`, 60000, 'navigation'));
+          }
           await resize();
         },
         async reload() { const before = await evaluate(() => performance.timeOrigin); proxy.send('location.reload()'); await guarded(() => proxy.until(`return performance.timeOrigin !== ${before} && document.readyState === 'complete'`, 60000, 'reload')); },

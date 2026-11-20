@@ -39,9 +39,12 @@ export async function startPage(upstream) {
       const body = await readBody(request);
 
       if (ours && what === "result") {
-        const result = JSON.parse(body);
-        waiting.get(result.id)?.(result);
-        waiting.delete(result.id);
+        let result;
+        try { result = JSON.parse(body); } catch { result = null; }
+        if (result && result.id !== undefined) {
+          waiting.get(result.id)?.(result);
+          waiting.delete(result.id);
+        }
       }
       response.writeHead(204).end();
       return;
@@ -85,12 +88,15 @@ export async function startPage(upstream) {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
       checkOpen();
-      const value = await run(js, 5_000).catch(error => { checkOpen(); return null; });
+      const remaining = end - Date.now();
+      if (remaining <= 0) break;
+      const value = await run(js, Math.min(5_000, remaining)).catch(() => { checkOpen(); return null; });
       if (value) return value;
-      await new Promise(resolve => setTimeout(resolve, 250));
+      const wait = Math.min(250, Math.max(0, end - Date.now()));
+      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
     }
     checkOpen();
-    const state = await run(explain, 5_000).catch(error => String(error));
+    const state = await run(explain, Math.min(5_000, Math.max(50, timeoutMs))).catch(error => String(error));
     throw new Error(`timed out waiting for ${what}: ${JSON.stringify(state)}`);
   }
   const close = () => new Promise(resolve => { closed = true; for (const complete of waiting.values()) complete({ error: "Safari page bridge closed" }); waiting.clear(); queue = []; server.closeAllConnections?.(); server.close(() => resolve()); });

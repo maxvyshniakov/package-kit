@@ -32,3 +32,10 @@ test('closing the bridge cancels polling and rejects new commands immediately', 
   await assert.rejects(proxy.run('return 1'), /bridge closed/);
   assert.throws(() => proxy.send('return 1'), /bridge closed/);
 });
+
+test('polling honors a short timeout without hanging for the default command timeout', async () => {
+  const proxy = await startPage('http://127.0.0.1:1');
+  try {
+    await assert.rejects(proxy.until('return false', 40, 'short-condition'), /timed out waiting for short-condition/);
+  } finally { await proxy.close(); }
+});

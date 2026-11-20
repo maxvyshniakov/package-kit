@@ -259,7 +259,7 @@ export async function shootStories(options, { launch, fetch: get = fetch, sleep 
       throw error;
     }
     if (stopping) {
-      await Promise.race([close(), new Promise(resolve => setTimeout(resolve, closeTimeout).unref?.())]);
+      await Promise.race([close(), new Promise(resolve => setTimeout(resolve, closeTimeout).unref?.())]).catch(error => warn(String(error)));
       return exit(128 + os.constants.signals[stopping]);
     }
     try {

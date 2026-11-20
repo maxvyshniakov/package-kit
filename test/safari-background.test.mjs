@@ -163,3 +163,43 @@ test('sync cleanup retains baseline processes and sweeps one service relaunch', 
   await system.sweepSync(new Set(['11']));
   assert.deepEqual(killed, [22, 33]);
 });
+
+test('subsequent navigation waits for a new document timeOrigin even for the same URL', async () => {
+  const f = fake();
+  const untilPredicates = [];
+  f.proxy.run = async js => js.includes('innerWidth') ? [1280, 900] : js.includes('timeOrigin') ? 1234.5 : true;
+  f.proxy.until = async js => { untilPredicates.push(js); return true; };
+  const browser = await launchSafari(f.system);
+  try {
+    const page1 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page1.goto('http://localhost:6010/iframe.html?id=button');
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page2.goto('http://localhost:6010/iframe.html?id=button');
+    assert.equal(untilPredicates.length, 2);
+    assert.match(untilPredicates[1], /performance\.timeOrigin !== 1234\.5/);
+  } finally { await browser.close(); }
+});
+
+test('shared Safari lock enforces mutual exclusion, reclaims dead owners and removes legacy lock files', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { acquireLock } = await import('../src/safari-background/lock.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-lock-'));
+  const lockPath = path.join(dir, 'stp.lock');
+  try {
+    const first = acquireLock(lockPath, { pid: 1001, isAlive: pid => pid === 1001 });
+    assert.equal(typeof first.release, 'function');
+    assert.deepEqual(acquireLock(lockPath, { pid: 1002, isAlive: pid => pid === 1001 }), { held: 1001 });
+    // Dead owner is reclaimed without requiring release.
+    const reclaimed = acquireLock(lockPath, { pid: 1003, isAlive: pid => pid === 1003 });
+    assert.equal(typeof reclaimed.release, 'function');
+    reclaimed.release();
+    // Legacy plain-file lock from a dead run is cleaned up.
+    fs.writeFileSync(lockPath, '9999\n');
+    const fromLegacy = acquireLock(lockPath, { pid: 1004, isAlive: pid => pid === 1004 });
+    assert.equal(typeof fromLegacy.release, 'function');
+    fromLegacy.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
