@@ -147,3 +147,79 @@ export async function leaseSelf(slots, { env = process.env, input, purpose = pro
   process.exitCode = await runLeased(slots, [process.execPath, ...process.argv.slice(1)], { env, input, purpose });
   return true;
 }
+
+/**
+ * Whether a waiter asked this process's yieldable lease to give its slots back
+ * (slotfather's client protocol: SLOTFATHER_YIELD names a request file).
+ */
+export function yieldRequested(env = process.env) {
+  return Boolean(env.SLOTFATHER_YIELD) && fs.existsSync(env.SLOTFATHER_YIELD);
+}
+
+/**
+ * Environment copy without SLOTFATHER_YIELD: only the runner that took the
+ * lease yields between steps, never the child commands it spawns.
+ */
+export function withoutYield(env = process.env) {
+  if (!("SLOTFATHER_YIELD" in env)) return env;
+  const copy = { ...env };
+  delete copy.SLOTFATHER_YIELD;
+  return copy;
+}
+
+/**
+ * Runs `slotfather yield` between steps so a higher-priority waiter can run,
+ * resolving once the lease holds its slots again. Rejects with an Error with
+ * `code = "LEASE_LOST"` when yielding fails (the lease is gone, so stop).
+ * If `signal` aborts while waiting, kills `slotfather yield`.
+ */
+export function yieldSlots({ env = process.env, signal, spawnImpl = spawn } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const error = new Error(`slotfather yield aborted (${signal.reason ?? "aborted"})`);
+      error.code = "LEASE_LOST";
+      reject(error);
+      return;
+    }
+    const child = spawnImpl("slotfather", ["yield"], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding?.("utf8");
+    child.stderr?.setEncoding?.("utf8");
+    child.stdout?.on?.("data", chunk => { stdout += chunk; });
+    child.stderr?.on?.("data", chunk => { stderr += chunk; });
+    const onAbort = () => {
+      try {
+        child.kill(typeof signal.reason === "string" && signal.reason.startsWith("SIG") ? signal.reason : "SIGTERM");
+      } catch {
+        // already exited
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    let settled = false;
+    const finish = err => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (err) reject(err);
+      else resolve();
+    };
+    child.on("error", err => {
+      const error = new Error(`slotfather yield failed (${err.message})`);
+      error.code = "LEASE_LOST";
+      finish(error);
+    });
+    child.on("close", (code, termSignal) => {
+      if (code === 0 && !signal?.aborted) {
+        finish();
+        return;
+      }
+      const detail = termSignal
+        ? `signal ${termSignal}`
+        : `exit ${code}: ${(stderr || stdout || "").trim().slice(0, 300)}`;
+      const error = new Error(`slotfather yield failed (${detail})`);
+      error.code = "LEASE_LOST";
+      finish(error);
+    });
+  });
+}

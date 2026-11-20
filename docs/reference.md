@@ -171,11 +171,49 @@ small runner (for example two 5 GiB slots, a 10 GiB cap) steps that all read 0 s
 
 Re-measure after a change that adds tests or stories; a peak above its declared figure shows as `3.3/3.0`.
 
+### Change-aware selection and planning
+
+Each step in `verify.steps` or `verify.browser` (and in `chain()` option objects) may declare path scopes and tier metadata:
+
+```js
+export default {
+  verify: {
+    inert: ["**/*.md", "docs/**"],
+    runner: ["repo-kit.config.mjs"],
+    canary: ["unit tests"],
+    smoke: ({ plan }) => ["verify:lint", ...plan.checks.filter(r => r.suite === "browser" && !r.producer).map(r => r.id)],
+    steps: [
+      { name: "lint", command: ["run", "lint"], always: true, cheap: true, memory: 0.3 },
+      { name: "unit tests", command: ["run", "test"], inputs: ["packages/*/src/**"], usesCores: true },
+    ],
+    browser: chain([
+      ["build", ["run", "build"], { inputs: ["packages/*/src/**"] }],
+      [
+        ["browser checks", ["run", "check:browser", "--", "--no-build"], {
+          slots: 2,
+          inputs: ["packages/*/src/components/**"],
+          scopeArgs: ({ matchedPaths, full }) => full ? [] : [...new Set(matchedPaths.map(p => p.split("/")[3]).filter(Boolean))],
+        }],
+      ],
+    ]),
+  },
+};
+```
+
+- `inputs`: repository-relative globs (`*`, `?`, `**`, `{a,b}`, trailing `/`, `!` exclusions). A step also transitively triggers when a producer in its `needs` matches a changed path, and selecting a step pulls in its `needs` as producers.
+- `always: true`: runs on every non-empty change; its `inputs` still own their paths.
+- `inert`: globs for tracked paths no check reads. Any changed path matching no check's `inputs`, no `runner`, and no `inert` is reported in `unowned` and falls back to a full run.
+- `runner` + `canary`: when a `runner` path changes, `canary` checks run instead of forcing a full run.
+- `cheap: true`: runs in the cheap-first tier (with its `needs`) before heavier steps; any failure in the cheap tier stops heavier steps from starting.
+- `scopeArgs({ paths, matchedPaths, full, release })`: returns extra CLI arguments appended to `command` on scoped runs (`full: false`), or `[]` on full runs (`full: true`).
+- `smoke`: array of check names/IDs, function `({ paths, plan, checks }) => ids`, or `smoke: true` on steps; queried via `repo-kit-lane --changed --base REF --plan --smoke --json` or `planSmoke()`.
+- Consumers that declare no `inputs`, `always`, `inert`, or `runner` keep the legacy `full: true` behavior unchanged.
+
 ## Commands
 
 | Command | Does |
 |---|---|
-| `verify [--release] [--browser]` | Runs the config's steps side by side, within the run's memory. Output streams with a step prefix. The first failure stops the rest and prints that step's last 80 lines; a step past its timeout fails and its whole process tree is stopped; a signal stops every step, and a reaper stops them when verify is killed outright. The summary shows the peak RSS and each step's measured peak beside its declared `memory`: the resident memory of the step's whole process tree, browsers in sessions of their own included, and on Linux the job cgroup's peak. |
+| `verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse] [--keep-going]` | Runs the config's steps side by side, within the run's memory. Output streams with a step prefix. The first failure stops the rest (unless `--keep-going` is set, which lets independent steps finish while dependants stay blocked) and prints that step's last 80 lines; a step past its timeout fails and its whole process tree is stopped; a signal stops every step, and a reaper stops them when verify is killed outright. With `--changed [--base REF]` (default `HEAD`), runs only checks whose `inputs` (or transitive `needs` producers' `inputs`) changed, plus `always` checks, falling back to a full run when an unowned path changed (`--plan [--json]` prints the plan without taking a lease or running checks). Steps with `cheap: true` run in the cheap-first tier before heavier steps; a red cheap step stops heavier steps from starting. On a clean committed checkout, passed checks are reused per `(HEAD^{tree}, platform, command, runtime, transitive needs)` unless `--no-reuse`, `REPO_KIT_NO_REUSE=1`, or a local-source override (such as `SID_KIT_SOURCE`) is set (producers still run if any dependent is uncached). Under a `--yieldable` Slotfather lease (`SLOTFATHER_YIELD`), yields between checks when a waiter asks. The summary shows the peak RSS and each step's measured peak beside its declared `memory`: the resident memory of the step's whole process tree, browsers in sessions of their own included, and on Linux the job cgroup's peak. |
 | `pre-push` | Runs from `.githooks/pre-push`. Verifies each pushed commit in a clean temporary worktree (`--release` for `main`), once per commit. Refuses Bun older than 1.4.4. Skip once with `git push --no-verify`. |
 | `hooks install` | `prepare`: points `core.hooksPath` at `.githooks`, unless someone set another path or `CI` is set. |
 | `hooks sync` | Writes the managed hooks into `.githooks`: a `pre-push` shim and `reference-transaction`; `lane-check` with a `.lanefather.toml`; `commit-msg` with `changelog.paths`. `hooks.managed` keeps only the named ones. Other hooks there are the repository's own, and an existing `commit-msg` of its own is never replaced. |

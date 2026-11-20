@@ -9,6 +9,7 @@ import { loadConfig } from './config.mjs';
 import { readCapacity, runVerify, verifySteps } from './verify.mjs';
 import { cleanEnvironment } from './pre-push.mjs';
 import { leaseSelf, verifyLeaseSlots } from './heavy.mjs';
+import { applyScopeArgs, changedPaths, planChecks, planSmoke } from './plan.mjs';
 
 export function configuredChecks(config) {
   const suites = ['verify', ...(config.verify.browser ? ['browser'] : [])];
@@ -33,11 +34,11 @@ export function laneLeaseSlots(config, selected, jobs = Infinity, { gibPerSlot =
 export async function main(args) {
   const { values } = parseArgs({ args, options: {
     help: { type: 'boolean' }, changed: { type: 'boolean' }, base: { type: 'string' }, plan: { type: 'boolean' },
-    json: { type: 'boolean' }, checks: { type: 'string' }, suites: { type: 'string' },
-    'keep-going': { type: 'boolean' }, jobs: { type: 'string' },
+    smoke: { type: 'boolean' }, json: { type: 'boolean' }, checks: { type: 'string' }, suites: { type: 'string' },
+    'keep-going': { type: 'boolean' }, 'no-reuse': { type: 'boolean' }, jobs: { type: 'string' },
   } });
   if (values.help) {
-    console.log('Usage: repo-kit-lane --changed --base REF --plan --json\n       repo-kit-lane [--checks IDS | --suites SUITES] [--keep-going] [--jobs N]');
+    console.log('Usage: repo-kit-lane --changed --base REF --plan [--smoke] --json\n       repo-kit-lane [--checks IDS [--base REF] | --suites SUITES] [--keep-going] [--no-reuse] [--jobs N]');
     return 0;
   }
   const gitEnv = cleanEnvironment();
@@ -47,20 +48,22 @@ export async function main(args) {
   if (values.plan) {
     if (values.checks !== undefined || values.suites !== undefined) throw new Error('plan does not take a run selection');
     if (!values.changed || !values.base || !values.json) throw new Error('plan requires --changed --base REF --plan --json');
-    const git = (...argv) => execFileSync('git', argv, { cwd: config.root, encoding: 'utf8', env: gitEnv });
-    const base = git('rev-parse', '--verify', '--end-of-options', `${values.base}^{commit}`).trim();
-    const paths = [...new Set([
-      ...git('diff', '--name-only', '-z', base, '--').split('\0'),
-      ...git('ls-files', '--others', '--exclude-standard', '-z').split('\0'),
-    ].filter(Boolean))].sort();
-    const suites = [...new Set(checks.map(check => check.suite))];
-    console.log(JSON.stringify({ v: 1, full: true, paths, unowned: [], suites,
-      reasons: Object.fromEntries(suites.map(suite => [suite, ['All configured steps are checked.']])),
-      checks: checks.map(({ id, suite }) => ({ id, suite, paths, producer: false })),
-    }));
+    const paths = changedPaths(config.root, values.base, { env: gitEnv });
+    let planned = planChecks({
+      checks,
+      paths,
+      inert: config.verify.inert,
+      runner: config.verify.runner,
+      canary: config.verify.canary,
+    });
+    if (values.smoke) {
+      planned = planSmoke(config, { checks, paths, plan: planned });
+    }
+    console.log(JSON.stringify(planned));
     return 0;
   }
-  if (values.changed || values.base || values.json) throw new Error('plan flags require --plan');
+  if (values.changed || values.json || values.smoke) throw new Error('plan flags require --plan');
+  if (values.base !== undefined && values.checks === undefined) throw new Error('--base without --plan requires --checks');
   if (values.checks !== undefined && values.suites !== undefined) throw new Error('choose --checks or --suites');
   const jobs = values.jobs === undefined ? Infinity : Number(values.jobs);
   if (values.jobs !== undefined && !(Number.isSafeInteger(jobs) && jobs > 0)) throw new Error('--jobs must be a positive integer');
@@ -102,11 +105,28 @@ export async function main(args) {
     return [check.id, log];
   }));
   const normalIds = selected.filter(check => check.suite === 'verify').map(check => check.id);
-  const steps = selected.map(({ id, suite, step }) => ({ ...step, name: id,
-    needs: [...step.needs.map(name => `${suite}:${encodeURIComponent(name)}`),
-      ...(suite === 'browser' ? normalIds : [])],
+  let steps = selected.map(({ id, suite, step }) => ({
+    ...step,
+    name: id,
+    needs: step.needs.map(name => `${suite}:${encodeURIComponent(name)}`),
+    ...(suite === 'browser' && normalIds.length ? { after: normalIds } : {}),
   }));
+  if (values.base !== undefined) {
+    const paths = changedPaths(config.root, values.base, { env: gitEnv });
+    const planned = planChecks({
+      checks,
+      paths,
+      inert: config.verify.inert,
+      runner: config.verify.runner,
+      canary: config.verify.canary,
+    });
+    const matchedByName = new Map(planned.checks.map(row => [row.id, row.paths]));
+    steps = applyScopeArgs(steps, { paths, matchedByName, full: planned.full });
+  } else {
+    steps = applyScopeArgs(steps, { paths: [], matchedByName: new Map(), full: true });
+  }
   const result = await runVerify(config, { steps, maxCores: jobs, env: gitEnv, keepGoing: Boolean(values['keep-going']),
+    reuse: !values['no-reuse'],
     onLine: (step, text) => fs.appendFileSync(logs.get(step.name), text + '\n'),
   });
   const environment = git('rev-parse', 'HEAD') !== head || git('status', '--porcelain')
@@ -116,10 +136,11 @@ export async function main(args) {
     interrupted: result.interrupted,
     checks: steps.map(step => {
       const row = byName.get(step.name);
-      const blockedBy = row ? [] : step.needs.filter(id => byName.get(id)?.status !== 'ok');
+      const blockedBy = row ? [] : [...step.needs, ...(step.after ?? [])].filter(id => byName.get(id)?.status !== 'ok');
       return { id: step.name, suite: byId.get(step.name).suite,
         status: environment ? 'void' : row ? { ok: 'passed', fail: 'failed', stopped: 'cancelled' }[row.status] : (!result.interrupted && blockedBy.length ? 'blocked' : 'cancelled'),
-        seconds: row?.seconds ?? 0, timed_out: Boolean(row?.timedOut), log: logs.get(step.name),
+        seconds: row?.seconds ?? 0, timed_out: Boolean(row?.timedOut), ...(row?.reused ? { reused: true } : {}),
+        log: logs.get(step.name),
         blocked_by: blockedBy,
       };
     }),

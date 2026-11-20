@@ -4,6 +4,18 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+### Added
+
+- Change-aware verification planning (repo-kit#5): steps in `verify.steps` and `verify.browser` may now declare `inputs` (repository-relative path globs with `*`, `?`, `**`, `{a,b}`, trailing `/`, and `!` exclusions), `always: true` (runs on every non-empty change while its `inputs` still own their paths), `cheap: true` (runs in the cheap-first tier before heavier steps; a red cheap step stops heavier steps from starting), `smoke: true` (tags steps for narrow post-merge smoke), and `scopeArgs({ paths, matchedPaths, full, release })` (appends dynamic arguments on scoped runs while full runs stay unfiltered). `verify` also accepts `inert` (tracked paths no check reads), `runner` + `canary` (canary checks when gate config/runner files change), and `smoke` (array or `({ paths, plan, checks }) => ids` for narrow post-merge smoke).
+- `repo-kit verify --changed [--base REF] [--plan] [--json] [--no-reuse]`: selects and runs only the checks whose inputs (or transitive producers' inputs) changed against `REF` (default `HEAD`), plus `always` checks, falling back to a full run when an unowned path changed. `--plan` prints the selection without acquiring a lease or running checks.
+- Local verified-tree check reuse: on a clean committed Git checkout, passed checks are cached per `(HEAD^{tree}, platform, step command)` under the repository's shared Git common dir and reused on repeat runs (only when all dependents of a producer are also reusable, so artifact-producing steps still run when a dependent must run). Pass `--no-reuse` or `REPO_KIT_NO_REUSE=1` to bypass.
+- Yield between checks under a `--yieldable` Slotfather lease (`SLOTFATHER_YIELD`): `verify` drains running steps, calls `slotfather yield`, and resumes once slots are regained, while stripping `SLOTFATHER_YIELD` from child step environments.
+- `@maxvyshniakov/repo-kit/plan` (and top-level exports `planChecks`, `planSmoke`, `changedPaths`, `createMatcher`).
+
+### Changed
+
+- `repo-kit-lane --changed --base REF --plan [--smoke] --json` now returns scoped change-aware plans (and narrow `--smoke` plans) instead of always answering `full: true` when steps declare `inputs`, `always`, `inert`, or `runner`. Consumers that have not declared path scopes keep the existing `full: true` behavior unchanged.
+
 ## 0.8.0 - 2026-11-16
 
 ### Added

@@ -1,5 +1,6 @@
 // What a repository's repo-kit.config.mjs may import.
 export { chain } from "./verify.mjs";
+export { changedPaths, createMatcher, planChecks, planSmoke } from "./plan.mjs";
 export { KIT_VERSION } from "./check.mjs";
 export { BUN_VERSION } from "./token.mjs";
 

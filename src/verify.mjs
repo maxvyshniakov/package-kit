@@ -21,9 +21,14 @@
 // resident memory of its whole process tree, browsers in sessions of their own
 // included, and on Linux the job cgroup's peak.
 import { execFile, execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import { withoutYield, yieldRequested as defaultYieldRequested, yieldSlots as defaultYieldSlots } from "./heavy.mjs";
+import { applyScopeArgs, changedPaths, createMatcher, formatPlan, planChecks } from "./plan.mjs";
+import { hostPlatform } from "./verified-tree.mjs";
 
 // Cores the steps beside a usesCores step keep busy while it runs.
 const RESERVED_CORES = 2;
@@ -54,6 +59,14 @@ export function normalizeSteps(steps, { stepTimeout = 0 } = {}) {
     if (step.workers && step.usesCores) throw new Error(`verify step "${step.name}": usesCores and workers exclude each other`);
     if (step.slots !== undefined && !(Number.isInteger(step.slots) && step.slots > 0)) throw new Error(`verify step "${step.name}": slots is a positive integer`);
     if (step.timeout !== undefined && !(step.timeout >= 0)) throw new Error(`verify step "${step.name}": timeout is minutes, a number of 0 (no limit) or more`);
+    if (step.inputs !== undefined) {
+      if (!Array.isArray(step.inputs)) throw new Error(`verify step "${step.name}": inputs must be an array of glob strings`);
+      createMatcher(step.inputs, `verify step "${step.name}" inputs`);
+    }
+    if (step.always !== undefined && typeof step.always !== "boolean") throw new Error(`verify step "${step.name}": always must be a boolean`);
+    if (step.cheap !== undefined && typeof step.cheap !== "boolean") throw new Error(`verify step "${step.name}": cheap must be a boolean`);
+    if (step.smoke !== undefined && typeof step.smoke !== "boolean") throw new Error(`verify step "${step.name}": smoke must be a boolean`);
+    if (step.scopeArgs !== undefined && typeof step.scopeArgs !== "function") throw new Error(`verify step "${step.name}": scopeArgs must be a function`);
     const needs = step.needs ?? [];
     for (const need of needs) {
       if (!seen.has(need)) throw new Error(`verify step "${step.name}" needs "${need}", which is not an earlier step`);
@@ -61,6 +74,168 @@ export function normalizeSteps(steps, { stepTimeout = 0 } = {}) {
     seen.add(step.name);
     return { ...step, needs, timeout: step.timeout ?? stepTimeout };
   });
+}
+
+/** Names of the cheap tier: every step with `cheap: true` and its transitive `needs` / `after`. */
+export function cheapTier(steps) {
+  const byName = new Map(steps.map(step => [step.name, step]));
+  const keep = new Set();
+  const stack = steps.filter(step => step.cheap).map(step => step.name);
+  while (stack.length) {
+    const name = stack.pop();
+    if (keep.has(name) || !byName.has(name)) continue;
+    keep.add(name);
+    const step = byName.get(name);
+    for (const need of [...(step.needs ?? []), ...(step.after ?? [])]) stack.push(need);
+  }
+  return keep;
+}
+
+/** Splits `steps` into `[first, rest]`: the cheap tier first, then the rest, each in plan order. */
+export function splitCheapFirst(steps) {
+  const tier = cheapTier(steps);
+  if (!tier.size) return [[], [...steps]];
+  const first = steps.filter(step => tier.has(step.name));
+  const rest = steps.filter(step => !tier.has(step.name));
+  return [first, rest];
+}
+
+/**
+ * HEAD's tree SHA and git common dir when `root` is a clean committed Git
+ * checkout (no modified, staged or untracked files); null otherwise.
+ */
+export function cleanCheckoutTree(root, { env = process.env } = {}) {
+  const git = (...argv) => {
+    try {
+      return execFileSync("git", argv, { cwd: root, encoding: "utf8", env, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return null;
+    }
+  };
+  const top = git("rev-parse", "--show-toplevel");
+  if (!top) return null;
+  try {
+    if (fs.realpathSync(top) !== fs.realpathSync(root)) return null;
+  } catch {
+    return null;
+  }
+  if (git("--no-optional-locks", "status", "--porcelain", "--untracked-files=normal") !== "") return null;
+  const tree = git("rev-parse", "--verify", "-q", "HEAD^{tree}");
+  const common = git("rev-parse", "--git-common-dir");
+  if (!tree || !common) return null;
+  return { tree, gitCommonDir: path.resolve(root, common) };
+}
+
+/** Environment variables that override local sources and must bypass verified-tree reuse. */
+export const REUSE_BYPASS_ENV_VARS = [
+  "SID_KIT_SOURCE",
+  "REPO_KIT_SOURCE",
+  "INLINE_MEASURE_SOURCE",
+  "TEXT_TRUNCATE_SOURCE",
+];
+
+/** Whether `env` sets a local-source override that makes verified-tree reuse unsafe. */
+export function hasReuseBypassEnv(env = process.env) {
+  return REUSE_BYPASS_ENV_VARS.some(name => Boolean(env[name]));
+}
+
+/**
+ * Deterministic cache key for a step's name, exact command, release mode,
+ * runtime version, and transitive `needs` cache keys.
+ */
+export function stepCacheKey(step, { release = false, runtime = process.version, needKeys = [] } = {}) {
+  return crypto.createHash("sha256")
+    .update(JSON.stringify({
+      name: step.name,
+      command: step.command,
+      release: Boolean(release),
+      runtime,
+      ...(needKeys.length ? { needs: needKeys } : {}),
+    }))
+    .digest("hex");
+}
+
+/** Computes deterministic cache keys for all `steps`, including transitive `needs` keys. */
+export function stepCacheKeys(steps, { release = false, runtime = process.version } = {}) {
+  const byName = new Map(steps.map(step => [step.name, step]));
+  const keys = new Map();
+  const visiting = new Set();
+  const compute = name => {
+    if (keys.has(name)) return keys.get(name);
+    const step = byName.get(name);
+    if (!step || visiting.has(name)) return null;
+    visiting.add(name);
+    const needKeys = (step.needs ?? [])
+      .map(need => compute(need) ?? `missing:${need}`)
+      .sort();
+    const key = stepCacheKey(step, { release, runtime, needKeys });
+    visiting.delete(name);
+    keys.set(name, key);
+    return key;
+  };
+  for (const step of steps) compute(step.name);
+  return keys;
+}
+
+/** Reads passed step cache keys for `(tree, platform)` from lock-free per-key markers in `cacheDir`. */
+export function readTreeCache(cacheDir, tree, platform = hostPlatform()) {
+  if (!cacheDir || !tree) return new Set();
+  const dir = path.join(cacheDir, tree, platform);
+  try {
+    return new Set(fs.readdirSync(dir).filter(name => !name.startsWith(".")));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Atomically records newly passed step cache keys for `(tree, platform)` via lock-free marker files. */
+export function writeTreeCache(cacheDir, tree, platform = hostPlatform(), keys = []) {
+  if (!cacheDir || !tree || !keys.length) return;
+  const dir = path.join(cacheDir, tree, platform);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const key of keys) {
+    if (!key || typeof key !== "string") continue;
+    const target = path.join(dir, key);
+    try {
+      fs.writeFileSync(target, "", { flag: "wx" });
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+  }
+}
+
+/**
+ * Step names that can safely be reused from `cachedKeys`: a step is reusable
+ * iff its key (including transitive `needs` keys) is cached, every artifact
+ * `need` is cached, AND every step in `steps` that declares it in `needs`
+ * (directly or transitively) is also reusable, so a producer whose dependent
+ * must run still builds its artifacts in this checkout. Ordering-only `after`
+ * barriers do not invalidate cached steps.
+ */
+export function reusableSteps(steps, cachedKeys, { release = false, runtime = process.version } = {}) {
+  if (!cachedKeys?.size) return new Set();
+  const keys = stepCacheKeys(steps, { release, runtime });
+  const upstreamCached = new Set();
+  for (const step of steps) {
+    const cached = cachedKeys.has(keys.get(step.name));
+    if (cached && (step.needs ?? []).every(need => upstreamCached.has(need))) {
+      upstreamCached.add(step.name);
+    }
+  }
+  const dependents = new Map(steps.map(step => [step.name, []]));
+  for (const step of steps) {
+    for (const need of step.needs ?? []) {
+      if (dependents.has(need)) dependents.get(need).push(step.name);
+    }
+  }
+  const reusable = new Set();
+  for (let index = steps.length - 1; index >= 0; index--) {
+    const step = steps[index];
+    if (upstreamCached.has(step.name) && dependents.get(step.name).every(dep => reusable.has(dep))) {
+      reusable.add(step.name);
+    }
+  }
+  return reusable;
 }
 
 /**
@@ -190,23 +365,63 @@ export function sizeSteps(steps, { workers, workerMemory = WORKER_MEMORY_GIB }) 
  * An aborted `signal` stops every running step in either mode. Resolves, once every started step has ended, to { name,
  * status: "ok" | "fail" | "stopped", seconds } per started step.
  */
-export async function runSteps(steps, start, { now = Date.now, signal, memory = Infinity, slots = Infinity, keepGoing = false } = {}) {
-  const results = new Map();
+async function runStepGroup(steps, start, {
+  now = Date.now, signal, memory = Infinity, slots = Infinity, keepGoing = false,
+  reused = new Set(), yieldRequested, yieldSlots, initialResults = [],
+} = {}) {
+  const results = new Map(initialResults.map(row => [row.name, row]));
+  const groupNames = new Set(steps.map(step => step.name));
   const running = new Map();
   let held = 0;
   let heldSlots = 0;
   let halted = false;
+  let yielding = false;
   const halt = reason => {
     halted = true;
     for (const handle of running.values()) handle.stop(reason);
   };
   await new Promise(resolve => {
+    const ready = step => step.needs.every(need => results.get(need)?.status === "ok")
+      && (step.after ?? []).every(id => results.get(id)?.status === "ok");
     const launch = () => {
+      if (yielding) return;
+      // Resolve any reused steps whose needs are already satisfied without starting a process.
+      let reusedAny;
+      do {
+        reusedAny = false;
+        for (const step of halted ? [] : steps) {
+          if (results.has(step.name) || running.has(step.name)) continue;
+          if (!ready(step)) continue;
+          if (reused?.has(step.name)) {
+            results.set(step.name, { name: step.name, status: "ok", seconds: 0, reused: true });
+            reusedAny = true;
+          }
+        }
+      } while (reusedAny);
+
+      // Yield between checks when a higher-priority slotfather waiter asked.
+      const hasRunnable = !halted && steps.some(step =>
+        !results.has(step.name) && !running.has(step.name) && ready(step));
+      if (hasRunnable && yieldRequested?.()) {
+        if (running.size) return;
+        yielding = true;
+        Promise.resolve().then(() => yieldSlots?.({ signal })).then(() => {
+          yielding = false;
+          launch();
+        }, error => {
+          yielding = false;
+          halted = true;
+          if (error?.message) console.error(`verify: ${error.message}`);
+          if (!running.size) resolve();
+        });
+        return;
+      }
+
       // Once a slot-taking step waits, later ones wait behind it: a big step is not starved by small ones.
       let slotWaiting = false;
       for (const step of halted ? [] : steps) {
         if (results.has(step.name) || running.has(step.name)) continue;
-        if (!step.needs.every(need => results.get(need)?.status === "ok")) continue;
+        if (!ready(step)) continue;
         const needed = step.memory ?? 0;
         if (running.size && held + needed > memory) continue;
         // A step asking more than the run has runs once no other slot-taking step does.
@@ -230,13 +445,27 @@ export async function runSteps(steps, start, { now = Date.now, signal, memory = 
           launch();
         });
       }
-      if (!running.size) resolve();
+      if (!running.size && !yielding) resolve();
     };
     if (signal?.aborted) halted = true;
     signal?.addEventListener("abort", () => halt(signal.reason), { once: true });
     launch();
   });
-  return [...results.values()];
+  return [...results.values()].filter(row => groupNames.has(row.name));
+}
+
+export async function runSteps(steps, start, opts = {}) {
+  if (steps.some(step => step.cheap)) {
+    const [first, rest] = splitCheapFirst(steps);
+    const firstResults = await runStepGroup(first, start, opts);
+    const firstFailed = firstResults.length < first.length
+      || firstResults.some(row => row.status !== "ok")
+      || opts.signal?.aborted;
+    if (firstFailed || !rest.length) return firstResults;
+    const restResults = await runStepGroup(rest, start, { ...opts, initialResults: firstResults });
+    return [...firstResults, ...restResults];
+  }
+  return runStepGroup(steps, start, opts);
 }
 
 /**
@@ -525,7 +754,7 @@ function signalStep(pid, processes, signal) {
 }
 
 function startProcess(step, { root, running, mark, processes = () => [], onLine = () => {}, environment = process.env }) {
-  const env = { ...environment, [STEP_MARK]: mark };
+  const env = { ...withoutYield(environment), [STEP_MARK]: mark };
   if (step.workers) env.VITEST_MAX_WORKERS = env.REPO_KIT_WORKERS = String(step.workers);
   if (step.slots) env.REPO_KIT_STEP_SLOTS = String(Math.min(step.slots, runSlots(environment)));
   // Each step gets its own process group, so stopping it reaches its workers too.
@@ -599,12 +828,76 @@ function startProcess(step, { root, running, mark, processes = () => [], onLine 
 }
 
 /** Runs the gate in `root`; sets process.exitCode rather than exiting, so piped output drains. */
-export async function runVerify(config, { release = false, browser = false, steps: declaredSteps, onLine, maxCores = Infinity, env = process.env, keepGoing = false } = {}) {
+export async function runVerify(config, {
+  release = false, browser = false, changed = false, base = "HEAD", plan = false, json = false,
+  reuse = true, reuseDir, steps: declaredSteps, onLine, maxCores = Infinity, env = process.env, keepGoing = false,
+} = {}) {
+  let planned = null;
+  let baseSteps = declaredSteps;
+  if (!baseSteps) {
+    const allSteps = verifySteps(config, { release, browser });
+    if (changed) {
+      const suite = browser ? "browser" : "verify";
+      const allChecks = [
+        ...(config.verify.steps
+          ? (browser ? verifySteps(config, { release, browser: false }) : allSteps)
+            .map(step => ({ id: `verify:${step.name}`, suite: "verify", step }))
+          : []),
+        ...(config.verify.browser
+          ? (browser ? allSteps : verifySteps(config, { release, browser: true }))
+            .map(step => ({ id: `browser:${step.name}`, suite: "browser", step }))
+          : []),
+      ];
+      const paths = changedPaths(config.root, base, { env });
+      const repoPlan = planChecks({
+        checks: allChecks,
+        paths,
+        inert: config.verify.inert,
+        runner: config.verify.runner,
+        canary: config.verify.canary,
+      });
+      const suiteRows = repoPlan.checks
+        .filter(row => row.suite === suite)
+        .map(row => ({ ...row, id: row.id.slice(suite.length + 1) }));
+      const suiteSuites = repoPlan.suites.filter(name => name === suite);
+      const suiteReasons = suiteSuites.length && repoPlan.reasons[suite] ? { [suite]: repoPlan.reasons[suite] } : {};
+      planned = {
+        ...repoPlan,
+        suites: suiteSuites,
+        reasons: suiteReasons,
+        checks: suiteRows,
+      };
+      if (plan) {
+        console.log(json ? JSON.stringify(planned, null, 2) : formatPlan(planned));
+        process.exitCode = 0;
+        return { exit: 0, plan: planned, results: [], interrupted: null };
+      }
+      if (!planned.checks.length) {
+        console.log(formatPlan(planned));
+        process.exitCode = 0;
+        return { exit: 0, plan: planned, results: [], interrupted: null };
+      }
+      const selectedIds = new Set(planned.checks.map(row => row.id));
+      const matchedByName = new Map(planned.checks.map(row => [row.id, row.paths]));
+      baseSteps = applyScopeArgs(
+        allSteps.filter(step => selectedIds.has(step.name)),
+        { paths: planned.paths, matchedByName, full: planned.full, release },
+      );
+    } else {
+      baseSteps = applyScopeArgs(allSteps, { paths: [], matchedByName: new Map(), full: true, release });
+    }
+  }
   const cores = Math.min(verifyCores(env), maxCores);
   const memory = verifyMemory(env);
   const { workerMemory } = config.verify;
   const workers = unitTestWorkers(cores, memory, workerMemory);
-  const steps = sizeSteps(declaredSteps ?? verifySteps(config, { release, browser }), { workers, workerMemory });
+  const steps = sizeSteps(baseSteps, { workers, workerMemory });
+  const reuseEnabled = reuse && env.REPO_KIT_NO_REUSE !== "1" && !hasReuseBypassEnv(env);
+  const checkout = reuseEnabled ? cleanCheckoutTree(config.root, { env }) : null;
+  const cacheDir = checkout ? (reuseDir ?? path.join(checkout.gitCommonDir, "repo-kit-verified-tree")) : null;
+  const platform = hostPlatform();
+  const cachedKeys = checkout ? readTreeCache(cacheDir, checkout.tree, platform) : new Set();
+  const reused = checkout ? reusableSteps(steps, cachedKeys, { release }) : new Set();
   const running = new Set();
   // A signal stops every running step's process group and waits for them; a
   // second one kills them. One Ctrl-C under `bun run verify` arrives twice, from
@@ -634,6 +927,16 @@ export async function runVerify(config, { release = false, browser = false, step
   const marks = new Map(steps.map((step, index) => [`${RUN_MARK}.${index}`, step.name]));
   const memorySamples = sampleMemory(groups, marks);
   const reaper = startReaper();
+  const yieldOpts = env.SLOTFATHER_YIELD
+    ? {
+        yieldRequested: () => defaultYieldRequested(env),
+        yieldSlots: async ({ signal } = {}) => {
+          console.log("verify: a waiter asked for this run's slots; yielding lease between checks");
+          await defaultYieldSlots({ env, signal });
+          console.log("verify: lease slots regained; resuming");
+        },
+      }
+    : {};
   const results = await runSteps(steps, step => {
     console.log(`  start ${step.name} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
     const handle = startProcess(step, { root: config.root, running, mark: `${RUN_MARK}.${steps.indexOf(step)}`, processes: () => memorySamples.processes(step.name), onLine, environment: env });
@@ -648,9 +951,19 @@ export async function runVerify(config, { release = false, browser = false, step
       });
     }
     return handle;
-  }, { signal: interrupt.signal, memory, slots: runSlots(env), keepGoing });
+  }, { signal: interrupt.signal, memory, slots: runSlots(env), keepGoing, reused, ...yieldOpts });
   const peak = memorySamples.stop();
   reaper.done();
+  if (checkout) {
+    const after = cleanCheckoutTree(config.root, { env });
+    if (after && after.tree === checkout.tree) {
+      const keys = stepCacheKeys(steps, { release });
+      const passedKeys = results
+        .filter(row => row.status === "ok" && !row.reused)
+        .map(row => keys.get(row.name));
+      writeTreeCache(cacheDir, checkout.tree, platform, passedKeys);
+    }
+  }
   for (const { name, timedOut } of results.filter(result => result.status === "fail")) {
     const how = timedOut ? `timed out after ${handles.get(name).timedOut}s` : "failed";
     console.log(`\n=== ${name} ${how}; its last ${FAILURE_TAIL_LINES} lines:`);
@@ -658,7 +971,10 @@ export async function runVerify(config, { release = false, browser = false, step
   }
   console.log("\nverify:");
   const symbol = { ok: "ok  ", fail: "FAIL", stopped: "stop" };
-  for (const { name, status, seconds, timedOut } of results) console.log(`  ${symbol[status]} ${name} (${seconds.toFixed(1)}s${timedOut ? ", timed out" : ""})`);
+  for (const { name, status, seconds, timedOut, reused: wasReused } of results) {
+    const detail = wasReused ? "reused" : `${seconds.toFixed(1)}s${timedOut ? ", timed out" : ""}`;
+    console.log(`  ${symbol[status]} ${name} (${detail})`);
+  }
   for (const { name } of steps.filter(step => !results.some(result => result.name === step.name))) console.log(`  skip ${name}`);
   const failed = results.length < steps.length || results.some(result => result.status !== "ok");
   const shares = Object.entries(peak.steps).filter(([, gib]) => gib > 0).sort((a, b) => b[1] - a[1])
@@ -673,5 +989,5 @@ export async function runVerify(config, { release = false, browser = false, step
   // Not process.exit: stdout to a pipe (CI, the pre-push hook) is written
   // asynchronously, and exiting at once would cut off the steps' output.
   process.exitCode = interrupt.signal.aborted ? 128 + os.constants.signals[interrupt.signal.reason] : failed ? 1 : 0;
-  return { exit: process.exitCode, results, interrupted: interrupt.signal.reason ?? null };
+  return { exit: process.exitCode, results, interrupted: interrupt.signal.reason ?? null, ...(planned ? { plan: planned } : {}) };
 }
