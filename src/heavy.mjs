@@ -147,3 +147,37 @@ export async function leaseSelf(slots, { env = process.env, input, purpose = pro
   process.exitCode = await runLeased(slots, [process.execPath, ...process.argv.slice(1)], { env, input, purpose });
   return true;
 }
+
+/**
+ * Whether a waiter asked this process's yieldable lease to give its slots back
+ * (slotfather's client protocol: SLOTFATHER_YIELD names a request file).
+ */
+export function yieldRequested(env = process.env) {
+  return Boolean(env.SLOTFATHER_YIELD) && fs.existsSync(env.SLOTFATHER_YIELD);
+}
+
+/**
+ * Environment copy without SLOTFATHER_YIELD: only the runner that took the
+ * lease yields between steps, never the child commands it spawns.
+ */
+export function withoutYield(env = process.env) {
+  if (!("SLOTFATHER_YIELD" in env)) return env;
+  const copy = { ...env };
+  delete copy.SLOTFATHER_YIELD;
+  return copy;
+}
+
+/**
+ * Runs `slotfather yield` between steps so a higher-priority waiter can run,
+ * returning once the lease holds its slots again. Throws an Error with
+ * `code = "LEASE_LOST"` when yielding fails (the lease is gone, so stop).
+ */
+export function yieldSlots({ env = process.env, spawnSyncImpl = spawnSync } = {}) {
+  const result = spawnSyncImpl("slotfather", ["yield"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (result.error || result.status !== 0) {
+    const detail = result.error ? result.error.message : `exit ${result.status}: ${(result.stderr || result.stdout || "").trim().slice(0, 300)}`;
+    const error = new Error(`slotfather yield failed (${detail})`);
+    error.code = "LEASE_LOST";
+    throw error;
+  }
+}

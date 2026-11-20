@@ -4,7 +4,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const USAGE = `Usage: repo-kit <command>
-  verify [--release] [--browser]   the repository's gate (repo-kit.config.mjs verify)
+  verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse]
+                                   the repository's gate (repo-kit.config.mjs verify)
   pre-push                         the pre-push hook: verify each pushed commit in a clean worktree
   heavy <slots|all> <command...>   run a command under a slotfather lease, when slotfather is installed
   shoot <story id filter...> [<storybook url>|--url=] [--theme=light,dark] [--width=1280,375]
@@ -81,11 +82,38 @@ export async function main([command, ...args]) {
   const config = await loadConfig();
   switch (command) {
     case "verify": {
-      const browser = args.includes("--browser");
-      const { leaseSelf, verifyLeaseSlots } = await import("./heavy.mjs");
-      if (await leaseSelf(verifyLeaseSlots(browser ? config.verify.browserSlots : config.verify.slots), { purpose: browser ? "verify browser" : "verify" })) return process.exitCode;
+      const { parseArgs } = await import("node:util");
+      const { values } = parseArgs({
+        args,
+        options: {
+          release: { type: "boolean", default: false },
+          browser: { type: "boolean", default: false },
+          changed: { type: "boolean", default: false },
+          base: { type: "string" },
+          plan: { type: "boolean", default: false },
+          json: { type: "boolean", default: false },
+          "no-reuse": { type: "boolean", default: false },
+          "keep-going": { type: "boolean", default: false },
+        },
+      });
+      if (values.json && !values.plan) throw new Error("verify: --json requires --plan");
+      if (values.plan && !values.changed) throw new Error("verify: --plan requires --changed");
+      if (values.base !== undefined && !values.changed) throw new Error("verify: --base requires --changed");
+      if (!values.plan) {
+        const { leaseSelf, verifyLeaseSlots } = await import("./heavy.mjs");
+        if (await leaseSelf(verifyLeaseSlots(values.browser ? config.verify.browserSlots : config.verify.slots), { purpose: values.browser ? "verify browser" : "verify" })) return process.exitCode;
+      }
       const { runVerify } = await import("./verify.mjs");
-      await runVerify(config, { release: args.includes("--release"), browser });
+      await runVerify(config, {
+        release: values.release,
+        browser: values.browser,
+        changed: values.changed,
+        base: values.base,
+        plan: values.plan,
+        json: values.json,
+        reuse: !values["no-reuse"],
+        keepGoing: values["keep-going"],
+      });
       return process.exitCode;
     }
     case "shoot": {

@@ -17,6 +17,7 @@
     "./changelog": "./src/changelog.mjs",
     "./packed-consumer": "./src/packed-consumer.mjs",
     "./perf-budget": "./src/perf-budget.mjs",
+    "./plan": "./src/plan.mjs",
     "./publish": "./src/publish.mjs",
     "./release": "./src/release.mjs",
     "./shoot": "./src/shoot.mjs",

@@ -122,10 +122,13 @@ export default {
 ```
 
 Run `bun run verify`. Replace the example step with your actual test/build commands; add `needs` to order steps
-that consume another step's output. Independent steps can run together when their declared memory fits.
-Output streams with step names, and a failed or timed-out command fails the run.
+that consume another step's output, and `inputs` globs to run only the steps a change touches via
+`repo-kit verify --changed [--base REF] [--plan]` (and scoped Lanefather lane checks). Independent steps can run
+together when their declared memory fits. Output streams with step names, and a failed or timed-out command fails
+the run.
 
 [Configuration and workspace examples](docs/reference.md#repo-kitconfigmjs) ·
+[Change-aware selection and planning](docs/reference.md#change-aware-selection-and-planning) ·
 [Memory and worker budgets](docs/reference.md#step-memory)
 
 ## Git hooks and branch policy
