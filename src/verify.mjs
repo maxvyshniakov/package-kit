@@ -76,7 +76,7 @@ export function normalizeSteps(steps, { stepTimeout = 0 } = {}) {
   });
 }
 
-/** Names of the cheap tier: every step with `cheap: true` and its transitive `needs`. */
+/** Names of the cheap tier: every step with `cheap: true` and its transitive `needs` / `after`. */
 export function cheapTier(steps) {
   const byName = new Map(steps.map(step => [step.name, step]));
   const keep = new Set();
@@ -85,7 +85,8 @@ export function cheapTier(steps) {
     const name = stack.pop();
     if (keep.has(name) || !byName.has(name)) continue;
     keep.add(name);
-    for (const need of byName.get(name).needs ?? []) stack.push(need);
+    const step = byName.get(name);
+    for (const need of [...(step.needs ?? []), ...(step.after ?? [])]) stack.push(need);
   }
   return keep;
 }
@@ -125,54 +126,102 @@ export function cleanCheckoutTree(root, { env = process.env } = {}) {
   return { tree, gitCommonDir: path.resolve(root, common) };
 }
 
-/** Deterministic cache key for a step's name, exact command and release mode. */
-export function stepCacheKey(step, { release = false } = {}) {
+/** Environment variables that override local sources and must bypass verified-tree reuse. */
+export const REUSE_BYPASS_ENV_VARS = [
+  "SID_KIT_SOURCE",
+  "REPO_KIT_SOURCE",
+  "INLINE_MEASURE_SOURCE",
+  "TEXT_TRUNCATE_SOURCE",
+];
+
+/** Whether `env` sets a local-source override that makes verified-tree reuse unsafe. */
+export function hasReuseBypassEnv(env = process.env) {
+  return REUSE_BYPASS_ENV_VARS.some(name => Boolean(env[name]));
+}
+
+/**
+ * Deterministic cache key for a step's name, exact command, release mode,
+ * runtime version, and transitive `needs` cache keys.
+ */
+export function stepCacheKey(step, { release = false, runtime = process.version, needKeys = [] } = {}) {
   return crypto.createHash("sha256")
-    .update(JSON.stringify({ name: step.name, command: step.command, release: Boolean(release) }))
+    .update(JSON.stringify({
+      name: step.name,
+      command: step.command,
+      release: Boolean(release),
+      runtime,
+      ...(needKeys.length ? { needs: needKeys } : {}),
+    }))
     .digest("hex");
 }
 
-/** Reads passed step cache keys for `(tree, platform)` from `cacheDir`. */
+/** Computes deterministic cache keys for all `steps`, including transitive `needs` keys. */
+export function stepCacheKeys(steps, { release = false, runtime = process.version } = {}) {
+  const byName = new Map(steps.map(step => [step.name, step]));
+  const keys = new Map();
+  const visiting = new Set();
+  const compute = name => {
+    if (keys.has(name)) return keys.get(name);
+    const step = byName.get(name);
+    if (!step || visiting.has(name)) return null;
+    visiting.add(name);
+    const needKeys = (step.needs ?? [])
+      .map(need => compute(need) ?? `missing:${need}`)
+      .sort();
+    const key = stepCacheKey(step, { release, runtime, needKeys });
+    visiting.delete(name);
+    keys.set(name, key);
+    return key;
+  };
+  for (const step of steps) compute(step.name);
+  return keys;
+}
+
+/** Reads passed step cache keys for `(tree, platform)` from lock-free per-key markers in `cacheDir`. */
 export function readTreeCache(cacheDir, tree, platform = hostPlatform()) {
   if (!cacheDir || !tree) return new Set();
+  const dir = path.join(cacheDir, tree, platform);
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(cacheDir, `${tree}.json`), "utf8"));
-    const list = data?.platforms?.[platform];
-    return new Set(Array.isArray(list) ? list : []);
+    return new Set(fs.readdirSync(dir).filter(name => !name.startsWith(".")));
   } catch {
     return new Set();
   }
 }
 
-/** Atomically records newly passed step cache keys for `(tree, platform)` in `cacheDir`. */
+/** Atomically records newly passed step cache keys for `(tree, platform)` via lock-free marker files. */
 export function writeTreeCache(cacheDir, tree, platform = hostPlatform(), keys = []) {
   if (!cacheDir || !tree || !keys.length) return;
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const file = path.join(cacheDir, `${tree}.json`);
-  let data = { v: 1, tree, platforms: {} };
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (parsed && typeof parsed === "object" && parsed.platforms && typeof parsed.platforms === "object") {
-      data = parsed;
+  const dir = path.join(cacheDir, tree, platform);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const key of keys) {
+    if (!key || typeof key !== "string") continue;
+    const target = path.join(dir, key);
+    try {
+      fs.writeFileSync(target, "", { flag: "wx" });
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
     }
-  } catch {
-    // fresh cache file
   }
-  const merged = new Set([...(Array.isArray(data.platforms[platform]) ? data.platforms[platform] : []), ...keys]);
-  data.platforms[platform] = [...merged].sort();
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(data, null, 2) + "\n");
-  fs.renameSync(temp, file);
 }
 
 /**
  * Step names that can safely be reused from `cachedKeys`: a step is reusable
- * iff its key is cached AND every step in `steps` that depends on it (directly
- * or transitively) is also reusable, so a producer whose dependent must run
- * still builds its artifacts in this checkout.
+ * iff its key (including transitive `needs` keys) is cached, every artifact
+ * `need` is cached, AND every step in `steps` that declares it in `needs`
+ * (directly or transitively) is also reusable, so a producer whose dependent
+ * must run still builds its artifacts in this checkout. Ordering-only `after`
+ * barriers do not invalidate cached steps.
  */
-export function reusableSteps(steps, cachedKeys, { release = false } = {}) {
+export function reusableSteps(steps, cachedKeys, { release = false, runtime = process.version } = {}) {
   if (!cachedKeys?.size) return new Set();
+  const keys = stepCacheKeys(steps, { release, runtime });
+  const upstreamCached = new Set();
+  for (const step of steps) {
+    const cached = cachedKeys.has(keys.get(step.name));
+    if (cached && (step.needs ?? []).every(need => upstreamCached.has(need))) {
+      upstreamCached.add(step.name);
+    }
+  }
   const dependents = new Map(steps.map(step => [step.name, []]));
   for (const step of steps) {
     for (const need of step.needs ?? []) {
@@ -182,8 +231,7 @@ export function reusableSteps(steps, cachedKeys, { release = false } = {}) {
   const reusable = new Set();
   for (let index = steps.length - 1; index >= 0; index--) {
     const step = steps[index];
-    const cached = cachedKeys.has(stepCacheKey(step, { release }));
-    if (cached && dependents.get(step.name).every(dep => reusable.has(dep))) {
+    if (upstreamCached.has(step.name) && dependents.get(step.name).every(dep => reusable.has(dep))) {
       reusable.add(step.name);
     }
   }
@@ -333,6 +381,8 @@ async function runStepGroup(steps, start, {
     for (const handle of running.values()) handle.stop(reason);
   };
   await new Promise(resolve => {
+    const ready = step => step.needs.every(need => results.get(need)?.status === "ok")
+      && (step.after ?? []).every(id => results.get(id)?.status === "ok");
     const launch = () => {
       if (yielding) return;
       // Resolve any reused steps whose needs are already satisfied without starting a process.
@@ -341,7 +391,7 @@ async function runStepGroup(steps, start, {
         reusedAny = false;
         for (const step of halted ? [] : steps) {
           if (results.has(step.name) || running.has(step.name)) continue;
-          if (!step.needs.every(need => results.get(need)?.status === "ok")) continue;
+          if (!ready(step)) continue;
           if (reused?.has(step.name)) {
             results.set(step.name, { name: step.name, status: "ok", seconds: 0, reused: true });
             reusedAny = true;
@@ -351,17 +401,17 @@ async function runStepGroup(steps, start, {
 
       // Yield between checks when a higher-priority slotfather waiter asked.
       const hasRunnable = !halted && steps.some(step =>
-        !results.has(step.name) && !running.has(step.name)
-        && step.needs.every(need => results.get(need)?.status === "ok"));
+        !results.has(step.name) && !running.has(step.name) && ready(step));
       if (hasRunnable && yieldRequested?.()) {
         if (running.size) return;
         yielding = true;
-        Promise.resolve().then(() => yieldSlots?.()).then(() => {
+        Promise.resolve().then(() => yieldSlots?.({ signal })).then(() => {
           yielding = false;
           launch();
         }, error => {
           yielding = false;
           halted = true;
+          if (error?.message) console.error(`verify: ${error.message}`);
           if (!running.size) resolve();
         });
         return;
@@ -371,7 +421,7 @@ async function runStepGroup(steps, start, {
       let slotWaiting = false;
       for (const step of halted ? [] : steps) {
         if (results.has(step.name) || running.has(step.name)) continue;
-        if (!step.needs.every(need => results.get(need)?.status === "ok")) continue;
+        if (!ready(step)) continue;
         const needed = step.memory ?? 0;
         if (running.size && held + needed > memory) continue;
         // A step asking more than the run has runs once no other slot-taking step does.
@@ -788,15 +838,35 @@ export async function runVerify(config, {
     const allSteps = verifySteps(config, { release, browser });
     if (changed) {
       const suite = browser ? "browser" : "verify";
-      const suiteChecks = allSteps.map(step => ({ id: step.name, suite, step }));
+      const allChecks = [
+        ...(config.verify.steps
+          ? (browser ? verifySteps(config, { release, browser: false }) : allSteps)
+            .map(step => ({ id: `verify:${step.name}`, suite: "verify", step }))
+          : []),
+        ...(config.verify.browser
+          ? (browser ? allSteps : verifySteps(config, { release, browser: true }))
+            .map(step => ({ id: `browser:${step.name}`, suite: "browser", step }))
+          : []),
+      ];
       const paths = changedPaths(config.root, base, { env });
-      planned = planChecks({
-        checks: suiteChecks,
+      const repoPlan = planChecks({
+        checks: allChecks,
         paths,
         inert: config.verify.inert,
         runner: config.verify.runner,
         canary: config.verify.canary,
       });
+      const suiteRows = repoPlan.checks
+        .filter(row => row.suite === suite)
+        .map(row => ({ ...row, id: row.id.slice(suite.length + 1) }));
+      const suiteSuites = repoPlan.suites.filter(name => name === suite);
+      const suiteReasons = suiteSuites.length && repoPlan.reasons[suite] ? { [suite]: repoPlan.reasons[suite] } : {};
+      planned = {
+        ...repoPlan,
+        suites: suiteSuites,
+        reasons: suiteReasons,
+        checks: suiteRows,
+      };
       if (plan) {
         console.log(json ? JSON.stringify(planned, null, 2) : formatPlan(planned));
         process.exitCode = 0;
@@ -822,7 +892,7 @@ export async function runVerify(config, {
   const { workerMemory } = config.verify;
   const workers = unitTestWorkers(cores, memory, workerMemory);
   const steps = sizeSteps(baseSteps, { workers, workerMemory });
-  const reuseEnabled = reuse && env.REPO_KIT_NO_REUSE !== "1";
+  const reuseEnabled = reuse && env.REPO_KIT_NO_REUSE !== "1" && !hasReuseBypassEnv(env);
   const checkout = reuseEnabled ? cleanCheckoutTree(config.root, { env }) : null;
   const cacheDir = checkout ? (reuseDir ?? path.join(checkout.gitCommonDir, "repo-kit-verified-tree")) : null;
   const platform = hostPlatform();
@@ -860,9 +930,9 @@ export async function runVerify(config, {
   const yieldOpts = env.SLOTFATHER_YIELD
     ? {
         yieldRequested: () => defaultYieldRequested(env),
-        yieldSlots: () => {
+        yieldSlots: async ({ signal } = {}) => {
           console.log("verify: a waiter asked for this run's slots; yielding lease between checks");
-          defaultYieldSlots({ env });
+          await defaultYieldSlots({ env, signal });
           console.log("verify: lease slots regained; resuming");
         },
       }
@@ -887,10 +957,10 @@ export async function runVerify(config, {
   if (checkout) {
     const after = cleanCheckoutTree(config.root, { env });
     if (after && after.tree === checkout.tree) {
-      const byStepName = new Map(steps.map(step => [step.name, step]));
+      const keys = stepCacheKeys(steps, { release });
       const passedKeys = results
         .filter(row => row.status === "ok" && !row.reused)
-        .map(row => stepCacheKey(byStepName.get(row.name), { release }));
+        .map(row => keys.get(row.name));
       writeTreeCache(cacheDir, checkout.tree, platform, passedKeys);
     }
   }

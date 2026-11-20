@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const USAGE = `Usage: repo-kit <command>
-  verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse]
+  verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse] [--keep-going]
                                    the repository's gate (repo-kit.config.mjs verify)
   pre-push                         the pre-push hook: verify each pushed commit in a clean worktree
   heavy <slots|all> <command...>   run a command under a slotfather lease, when slotfather is installed

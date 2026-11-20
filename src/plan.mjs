@@ -18,7 +18,10 @@ export function compileGlob(glob, label = "inputs") {
     throw new Error(`${label}: expected a non-empty glob string, got ${JSON.stringify(glob)}`);
   }
   let source = "";
-  const pattern = glob.replace(/^\.\//, "").replace(/\/$/, "/**");
+  const pattern = glob.replace(/^(?:\.\/|\/)+/, "").replace(/\/$/, "/**");
+  if (!pattern) {
+    throw new Error(`${label}: "${glob}": empty glob pattern`);
+  }
   for (let index = 0; index < pattern.length; index++) {
     const char = pattern[index];
     if (char === "*" && pattern[index + 1] === "*") {
@@ -40,6 +43,9 @@ export function compileGlob(glob, label = "inputs") {
       const body = pattern.slice(index + 1, end);
       if (body.includes("{")) throw new Error(`${label}: "${glob}": nested {} is not supported`);
       if (body.includes("**")) throw new Error(`${label}: "${glob}": "**" inside {} is not supported; list the globs separately`);
+      if (body.includes("[") || body.includes("]")) {
+        throw new Error(`${label}: "${glob}": character classes ([...]) are not supported; use {a,b}`);
+      }
       source += `(?:${body.split(",").map(part => escapeRegExp(part).replaceAll("\\*", "[^/]*").replaceAll("\\?", "[^/]")).join("|")})`;
       index = end;
     } else source += escapeRegExp(char);
@@ -48,7 +54,7 @@ export function compileGlob(glob, label = "inputs") {
 }
 
 function normalizePath(file) {
-  return String(file).replaceAll("\\", "/").replace(/^\.\//, "");
+  return String(file).replaceAll("\\", "/").replace(/^(?:\.\/|\/)+/, "");
 }
 
 /**
@@ -173,9 +179,12 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
   const producersOf = id => {
     if (producersCache.has(id)) return producersCache.get(id);
     const found = new Set();
-    for (const need of needIds.get(id) ?? []) {
+    const stack = [...(needIds.get(id) ?? [])];
+    while (stack.length) {
+      const need = stack.pop();
+      if (need === id || found.has(need)) continue;
       found.add(need);
-      for (const ancestor of producersOf(need)) found.add(ancestor);
+      for (const upstream of needIds.get(need) ?? []) stack.push(upstream);
     }
     producersCache.set(id, found);
     return found;
@@ -196,7 +205,12 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
   const ownMatchers = new Map(checks.map(check => [check.id, createMatcher(check.step.inputs, `verify step "${check.step.name}" inputs`)]));
   const inertMatcher = createMatcher(inert, "verify.inert");
   const runnerMatcher = createMatcher(runner, "verify.runner");
-  const canaryIds = new Set((canary ?? []).flatMap(ref => resolveCheckRef(ref, checks, byId)));
+  const canaryIds = new Set();
+  for (const ref of canary ?? []) {
+    const resolved = resolveCheckRef(ref, checks, byId);
+    if (!resolved.length) throw new Error(`verify.canary references unknown check "${ref}"`);
+    for (const id of resolved) canaryIds.add(id);
+  }
 
   const triggered = new Map();
   const unowned = [];
@@ -234,7 +248,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
       id: check.id,
       suite: check.suite,
       paths: triggered.get(check.id) ?? [],
-      producer: !triggered.has(check.id),
+      producer: !fallbackFull && !triggered.has(check.id),
     }));
 
   const suites = allSuites.filter(suite => rows.some(row => row.suite === suite && (full || !row.producer)));
@@ -374,6 +388,8 @@ export function formatPlan(plan) {
   }
   if (plan.full) {
     lines.push("The change needs the full gate.");
+  } else if (!plan.checks.length) {
+    lines.push("No checks selected.");
   } else {
     lines.push(`${plan.checks.length} check(s) in ${plan.suites.join(", ")}.`);
   }

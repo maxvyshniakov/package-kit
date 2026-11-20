@@ -38,7 +38,7 @@ export async function main(args) {
     'keep-going': { type: 'boolean' }, 'no-reuse': { type: 'boolean' }, jobs: { type: 'string' },
   } });
   if (values.help) {
-    console.log('Usage: repo-kit-lane --changed --base REF --plan [--smoke] --json\n       repo-kit-lane [--checks IDS | --suites SUITES] [--keep-going] [--no-reuse] [--jobs N]');
+    console.log('Usage: repo-kit-lane --changed --base REF --plan [--smoke] --json\n       repo-kit-lane [--checks IDS [--base REF] | --suites SUITES] [--keep-going] [--no-reuse] [--jobs N]');
     return 0;
   }
   const gitEnv = cleanEnvironment();
@@ -105,9 +105,11 @@ export async function main(args) {
     return [check.id, log];
   }));
   const normalIds = selected.filter(check => check.suite === 'verify').map(check => check.id);
-  let steps = selected.map(({ id, suite, step }) => ({ ...step, name: id,
-    needs: [...step.needs.map(name => `${suite}:${encodeURIComponent(name)}`),
-      ...(suite === 'browser' ? normalIds : [])],
+  let steps = selected.map(({ id, suite, step }) => ({
+    ...step,
+    name: id,
+    needs: step.needs.map(name => `${suite}:${encodeURIComponent(name)}`),
+    ...(suite === 'browser' && normalIds.length ? { after: normalIds } : {}),
   }));
   if (values.base !== undefined) {
     const paths = changedPaths(config.root, values.base, { env: gitEnv });
@@ -121,7 +123,7 @@ export async function main(args) {
     const matchedByName = new Map(planned.checks.map(row => [row.id, row.paths]));
     steps = applyScopeArgs(steps, { paths, matchedByName, full: planned.full });
   } else {
-    steps = applyScopeArgs(steps, { paths: [], matchedByName: new Map(), full: values.checks === undefined });
+    steps = applyScopeArgs(steps, { paths: [], matchedByName: new Map(), full: true });
   }
   const result = await runVerify(config, { steps, maxCores: jobs, env: gitEnv, keepGoing: Boolean(values['keep-going']),
     reuse: !values['no-reuse'],
@@ -134,7 +136,7 @@ export async function main(args) {
     interrupted: result.interrupted,
     checks: steps.map(step => {
       const row = byName.get(step.name);
-      const blockedBy = row ? [] : step.needs.filter(id => byName.get(id)?.status !== 'ok');
+      const blockedBy = row ? [] : [...step.needs, ...(step.after ?? [])].filter(id => byName.get(id)?.status !== 'ok');
       return { id: step.name, suite: byId.get(step.name).suite,
         status: environment ? 'void' : row ? { ok: 'passed', fail: 'failed', stopped: 'cancelled' }[row.status] : (!result.interrupted && blockedBy.length ? 'blocked' : 'cancelled'),
         seconds: row?.seconds ?? 0, timed_out: Boolean(row?.timedOut), ...(row?.reused ? { reused: true } : {}),
