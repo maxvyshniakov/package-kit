@@ -147,7 +147,7 @@ export async function main([command, ...args]) {
       return runCiGate(config);
     }
     case "publish": {
-      if (args.includes("--prerelease") || args.includes("--dist-tag") || args.includes("--dry-run")) {
+      if (args.some(arg => arg === "--prerelease" || arg.startsWith("--prerelease=") || arg === "--dist-tag" || arg.startsWith("--dist-tag=") || arg === "--dry-run")) {
         const { parsePrereleaseOptions, runPrerelease } = await import("./publish-prerelease.mjs");
         return runPrerelease(config, parsePrereleaseOptions(args));
       }

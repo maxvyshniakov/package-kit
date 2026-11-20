@@ -20,6 +20,10 @@ export function parsePrereleaseOptions(args) {
    const key=arg==='--prerelease'?'preid':'tag';
    if(result[key]!==undefined) throw new Error(`Duplicate ${arg}`);
    result[key]=args[++i];
+  } else if(arg.startsWith('--prerelease=')||arg.startsWith('--dist-tag=')) {
+   const eq=arg.indexOf('='), flag=arg.slice(0,eq), key=flag==='--prerelease'?'preid':'tag';
+   if(result[key]!==undefined) throw new Error(`Duplicate ${flag}`);
+   result[key]=arg.slice(eq+1);
   } else throw new Error(`Unknown prerelease option: ${arg}`);
  }
  if(!/^[a-z][a-z0-9-]*$/.test(result.preid??'')) throw new Error('--prerelease needs a prerelease identifier');
@@ -40,7 +44,7 @@ export function archiveCommit({root,commit,into}) {
  const tar=execFileSync('git',['archive','--format=tar',commit],{cwd:root,maxBuffer:1024*1024*1024});
  execFileSync('tar',['-x','-C',into],{input:tar});
 }
-export async function runPrerelease(config,options, { tls = runTlsGate, tokenSource = resolveToken, request = fetch, execute = execFileSync } = {}) {
+export async function runPrerelease(config,options = {}, { tls = runTlsGate, tokenSource = resolveToken, request = fetch, execute = execFileSync } = {}) {
  // Revalidate programmatic callers as well as the CLI.
  const {preid,tag,dryRun}=parsePrereleaseOptions(['--prerelease',options.preid,'--dist-tag',options.tag,...(options.dryRun?['--dry-run']:[])]);
  const {root}=config;
@@ -72,7 +76,8 @@ export async function runPrerelease(config,options, { tls = runTlsGate, tokenSou
   if(!dryRun && (!/^\d+\.\d+\.\d+$/.test(latest??'') || !before.versions?.[latest])) {
    throw new Error('Prerelease upload requires an established stable latest version; first publication may assign latest even with an explicit tag');
   }
-  const {unreleased,errors}=parseChangelog(fs.readFileSync(path.join(pkg.dir,'CHANGELOG.md'),'utf8'));
+  if(pkg.changelog===undefined) throw new Error('Prerelease publishing requires CHANGELOG.md');
+  const {unreleased,errors}=parseChangelog(pkg.changelog);
   if(errors.length)throw new Error(`Malformed changelog: ${errors.join('; ')}`);
   const {version}=prereleaseVersion({current:pkg.version,published:Object.keys(before.versions??{}),unreleased,preid});
   const env={...process.env,GITHUB_TOKEN:token};

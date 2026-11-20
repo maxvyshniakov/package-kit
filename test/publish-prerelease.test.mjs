@@ -9,7 +9,8 @@ import { parsePrereleaseOptions, prereleaseVersion, archiveCommit, runPrerelease
 
 test('prerelease requires explicit non-latest tag and rejects ambiguous release options', () => {
  assert.deepEqual(parsePrereleaseOptions(['--prerelease','integration','--dist-tag','integration','--dry-run']), {preid:'integration',tag:'integration',dryRun:true});
- for(const args of [ ['--prerelease','integration'], ['--prerelease','integration','--dist-tag','latest'], ['--prerelease','integration','--dist-tag','beta','--resume'], ['--prerelease','bad/name','--dist-tag','beta'] ]) assert.throws(()=>parsePrereleaseOptions(args));
+ assert.deepEqual(parsePrereleaseOptions(['--prerelease=integration','--dist-tag=preview']), {preid:'integration',tag:'preview',dryRun:false});
+ for(const args of [ ['--prerelease','integration'], ['--prerelease','integration','--dist-tag','latest'], ['--prerelease=integration','--dist-tag=latest'], ['--prerelease','integration','--prerelease=other','--dist-tag','beta'], ['--prerelease','integration','--dist-tag','beta','--resume'], ['--prerelease','bad/name','--dist-tag','beta'] ]) assert.throws(()=>parsePrereleaseOptions(args));
 });
 test('counter follows newest stable minor and matching preid only', () => {
  assert.deepEqual(prereleaseVersion({current:'0.42.2',published:['0.42.3','0.43.0-integration.4','0.43.0-beta.99'],unreleased:'',preid:'integration'}), {base:'0.43.0',level:'minor',version:'0.43.0-integration.5'});
@@ -115,5 +116,17 @@ test('configured Python version source rejects a tooling npm manifest before cre
   await assert.rejects(runPrerelease({root:repo.root,changelog:{versionSource:'pyproject.toml'}}, {preid:'integration',tag:'integration'}, {
    tls:()=>{throw new Error('TLS must not run');}, tokenSource:()=>{throw new Error('credentials must not be read');},
   }), /npm packages/);
+ } finally {repo.cleanup();}
+});
+
+test('missing CHANGELOG.md fails with a clear error before install or upload', async () => {
+ const files=rootPackageFiles();
+ delete files['CHANGELOG.md'];
+ const repo=tempRepository(files, {git:true});
+ try {
+  await assert.rejects(runPrerelease({root:repo.root,changelog:{}}, {preid:'integration',tag:'integration',dryRun:true}, {
+   tls:()=>true, tokenSource:()=>({token:'fixture'}), request:async()=>({status:404}),
+   execute:()=>{throw new Error('install or upload must not start');},
+  }), /requires CHANGELOG\.md/);
  } finally {repo.cleanup();}
 });
