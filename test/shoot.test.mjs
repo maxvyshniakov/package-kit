@@ -8,7 +8,6 @@ import test from "node:test";
 import { withDefaults } from "../src/config.mjs";
 import { browserNames, FIREFOX_PLAYWRIGHT, launchBrowser, loadPlaywright, playwrightVersion, parseBrowserNames, parseShootArgs, readIndex, shootStories, shotFile, storyUrl } from "../src/shoot.mjs";
 import { EventEmitter } from "node:events";
-import { closeSafari, launchSafari, pairingRecovery, splitDrivers } from "../src/safari.mjs";
 import { decodeViewportImages } from "../src/shoot.mjs";
 import { kitRoot, tempRepository } from "./fixtures.mjs";
 
@@ -300,31 +299,6 @@ test("repo-kit shoot rejects bad arguments before it takes a lease", () => {
   }
 });
 
-test("Safari Technology Preview left paired by a dead driver is restarted; one paired with a live driver is busy", () => {
-  const paired = "safaridriver POST /session: Could not create a session: The Safari instance is already paired with another WebDriver session.";
-  assert.equal(pairingRecovery(paired, []), "restart");
-  assert.equal(pairingRecovery(paired, [4242]), "busy");
-  assert.equal(pairingRecovery("safaridriver POST /session: You must enable 'Allow remote automation'", []), "fail");
-});
-
-test("closing Safari ends the session, stops the driver, and quits the automation window only when this run started it", async () => {
-  const run = async ({ startedInstance, quit = async () => steps.push("quit"), deleteSession = async () => steps.push("delete") }) => {
-    steps.length = 0;
-    const warnings = [];
-    await closeSafari({ deleteSession, killDriver: () => steps.push("kill"), startedInstance, ownWindows: [77], quit, warn: message => warnings.push(message) });
-    return warnings;
-  };
-  const steps = [];
-  await run({ startedInstance: true });
-  assert.deepEqual(steps, ["delete", "kill", "quit"]);
-  await run({ startedInstance: false });
-  assert.deepEqual(steps, ["delete", "kill"], "an automation window that was there before the run is not ours to quit");
-  const warnings = await run({ startedInstance: true, quit: async () => { throw new Error("Safari Technology Preview's automation window did not quit"); } });
-  assert.deepEqual(warnings, ["repo-kit: Safari Technology Preview's automation window did not quit"], "a lingering window warns instead of failing the run");
-  await assert.rejects(run({ startedInstance: true, deleteSession: async () => { throw new Error("session gone"); } }), /session gone/);
-  assert.deepEqual(steps, ["kill", "quit"], "the driver stops and the window quits even when ending the session fails");
-});
-
 // repo-kit#3: the overall review of 0.3.1.
 
 test("decoding the images in view skips ones that never loaded and gives up after 5 s", async t => {
@@ -411,91 +385,12 @@ test("SIGTERM or SIGHUP closes the open browser before the run exits", async () 
   }
 });
 
-test("an orphaned safaridriver a run started is no live holder: the browser is restarted, not busy", () => {
-  const started = { 10: "Thu Nov 12 20:00:00 2026", 13: "Thu Nov 12 19:00:00 2026" };
-  const rows = [
-    { pid: 10, ppid: 1, start: "Thu Nov 12 20:00:00 2026" }, // a killed run's driver
-    { pid: 11, ppid: 500, start: "x" }, // a live run's
-    { pid: 12, ppid: 600, start: "y" }, // this run's own
-    { pid: 13, ppid: 1, start: "Thu Nov 12 21:30:00 2026" }, // the pid is reused by a later process
-    { pid: 14, ppid: 1, start: "z" }, // detached by someone else (nohup, a launchd agent): maybe serving
-  ];
-  const { live, orphans } = splitDrivers(rows, 12, started);
-  assert.deepEqual(live, [11, 13, 14]);
-  assert.deepEqual(orphans, [10]);
-  const paired = "safaridriver POST /session: Safari Technology Preview is already paired with another WebDriver session.";
-  assert.equal(pairingRecovery(paired, splitDrivers([rows[0]], 12, started).live), "restart");
-  assert.equal(pairingRecovery(paired, splitDrivers([rows[4]], 12, started).live), "busy");
-});
-
-/** A Safari Technology Preview stand-in: safaridriver's HTTP answers and the process table. */
-function fakeSafari({ ready = async () => {}, frontmost = () => "com.apple.Terminal", session = "ok", windowsBefore = [], windowsAfter = [77], inner = [1280, 900] } = {}) {
-  const events = [];
-  let windows = windowsBefore;
-  const system = {
-    exists: () => true,
-    freePort: async () => 4444,
-    spawn: () => ({ pid: 1000, kill: () => events.push("kill driver") }),
-    recordStarted: (pid, add) => events.push(`${add ? "record" : "forget"} ${pid}`),
-    waitForDriver: ready,
-    frontmostBundle: frontmost,
-    activate: bundle => events.push(`activate ${bundle}`),
-    otherDrivers: () => ({ live: session === "busy" ? [2000] : [], orphans: [] }),
-    automationPids: () => windows,
-    quitAutomationInstance: async which => events.push(`quit ${JSON.stringify(which)}`),
-    warn: () => {},
-    fetch: async (url, init) => {
-      const { pathname } = new URL(url);
-      events.push(`${init.method} ${pathname}`);
-      const reply = (ok, value) => ({ ok, status: ok ? 200 : 500, json: async () => ({ value }) });
-      if (pathname === "/session" && init.method === "POST") {
-        if (session === "busy") {
-          // The race's winner starts its window meanwhile.
-          windows = [...windowsBefore, 88];
-          return reply(false, { message: "Safari Technology Preview is already paired with another WebDriver session." });
-        }
-        windows = [...windowsBefore, ...windowsAfter];
-        return reply(true, { sessionId: "s1", capabilities: { browserVersion: "26" } });
-      }
-      if (pathname.endsWith("/execute/sync")) return reply(true, inner);
-      return reply(true, null);
-    },
-  };
-  return { events, system };
-}
-
-test("a failed Safari launch stops its driver, whatever failed", async () => {
-  const { events, system } = fakeSafari({ ready: async () => { throw new Error("safaridriver did not start"); } });
-  await assert.rejects(launchSafari(system), /did not start/);
-  assert.deepEqual(events, ["record 1000", "kill driver", "forget 1000"]);
-});
-
-test("Safari launches when the frontmost app cannot be read, and hands focus to none", async () => {
-  const { events, system } = fakeSafari({ frontmost: () => { throw new Error("osascript failed"); } });
-  const browser = await launchSafari(system);
-  assert.ok(events.includes("POST /session"));
-  assert.ok(!events.some(event => event.startsWith("activate")));
-  await browser.close();
-});
-
-test("a run that loses the start race quits no window; a run quits only the window its session started", async () => {
-  const lost = fakeSafari({ session: "busy" });
-  await assert.rejects(launchSafari(lost.system), /Another run holds it \(safaridriver 2000\)/);
-  assert.ok(!lost.events.some(event => event.startsWith("quit")), lost.events.join("\n"));
-
-  const won = fakeSafari({ windowsBefore: [55], windowsAfter: [77] });
-  const browser = await launchSafari(won.system);
-  await browser.close();
-  assert.deepEqual(won.events.filter(event => event.startsWith("quit") || event === "kill driver"), ["kill driver", "quit [77]"]);
-
-  const attached = fakeSafari({ windowsBefore: [55], windowsAfter: [] });
-  await (await launchSafari(attached.system)).close();
-  assert.ok(!attached.events.some(event => event.startsWith("quit")), "a run that started no window quits none");
-});
-
-test("a Safari viewport narrower than Safari allows fails instead of saving a wider picture", async () => {
-  const { system } = fakeSafari({ inner: [500, 800] });
-  const browser = await launchSafari(system);
-  await assert.rejects(browser.newPage({ viewport: { width: 375, height: 900 } }), /gives a 500 px wide viewport, not 375 px/);
-  await browser.close();
+test('final browser cleanup failure prevents reporting screenshot success', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-close-'));
+  const fake = fakeBrowsers();
+  try {
+    await assert.rejects(shootStories({ filters: ['button'], themes: ['light'], widths: [1280], browsers: ['safari'], out, full: false, url: 'http://sb' }, {
+      fetch: fetchIndex, sleep: async () => {}, log: () => {}, launch: name => ({ ...fake.launch(name), close: async () => { throw new Error('focus guard during cleanup'); } }),
+    }), /focus guard during cleanup/);
+  } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });

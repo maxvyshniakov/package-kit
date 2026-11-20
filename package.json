@@ -23,7 +23,8 @@
     "./release": "./src/release.mjs",
     "./shoot": "./src/shoot.mjs",
     "./friction-contract.json": "./friction-contract.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./safari-background": "./src/safari-background/index.mjs"
   },
   "files": [
     "src",

@@ -541,29 +541,25 @@ then fails naming them.
 | `chromium` | Playwright's Chromium, the `chromium` channel (not the headless shell). |
 | `firefox` | The installed `/Applications/Firefox.app` over WebDriver BiDi (Playwright's `moz-firefox` channel). Playwright's own patched Firefox does not start on macOS 27 ("Could not find profile folder"), and it is not the Firefox users run. |
 | `webkit` | Playwright's WebKit. It renders like Safari but has none of Safari's scrolling or settings: static layout only. |
-| `safari` | Safari Technology Preview over its own `safaridriver`. Viewport pictures only (WebDriver), `fullPage` is ignored. |
+| `safari` | Real Safari Technology Preview through the background transport. Viewport pictures only; `fullPage` is ignored. |
 
 Playwright stays the repository's own pinned devDependency: repo-kit declares it as an optional peer (`>=1.50.0`)
 and loads it from the repository root, and `safari` needs none. `firefox` needs Firefox installed and Playwright 1.57
 or later, the first that launches the `moz-firefox` channel; on an older one `--browser=firefox` fails before it
 starts, naming both versions, and the other browsers run as before.
 
-Safari itself refuses WebDriver while the user has it open, so `safari` drives Safari Technology Preview, which runs
-beside it. One-time setup: `brew install --cask safari-technology-preview` (the installer asks for an
-administrator password), then in its own Settings, Advanced → "Show features for web developers" and Developer →
-"Allow remote automation". safaridriver brings the window to the front; shoot hands focus straight back to the app
-that had it, and the window keeps drawing behind the user's apps. When the run ends, shoot quits the automation window
-it started (SIGTERM: in automation mode it ignores a quit request and window close). Do not hide or minimise it: WebKit then marks the
-page hidden, stops drawing frames and cannot screenshot. A run that ended without closing its session (killed, or its
-safaridriver gone) leaves Safari Technology Preview "already paired with another WebDriver session"; when no other
-live safaridriver of it runs (one a repo-kit run started, recorded with its start time in the temporary directory,
-whose run was killed is orphaned to launchd, ppid 1, and is stopped; any other driver counts as live), shoot quits
-that automation window (`--automation`, never the user's own) and starts again, and when one runs, it fails naming
-that driver. SIGTERM and SIGHUP close the browser before the run exits. A run quits only the automation window its
-own session started, so two runs starting together never quit each other's; an automation window a session
-attaches to without starting it (one an earlier quit left behind) stays open until a restart quits it. Safari keeps a minimum window size: a
-`--width` narrower than the viewport it gives fails the run instead of saving a wider picture under that name; a
-height the display cannot fit warns.
+Safari uses the background route extracted from Data Grid's real-STP harness: a shared lock,
+non-activating `NSWorkspace` launch (the native `open -g` equivalent), a tokenized local page bridge, Accessibility window sizing, window capture and
+continuous frontmost monitoring. It does not start WebDriver or activate another app afterward.
+An already running STP instance is left alone and reported busy. The run closes only its owned
+PID, page bridge and watcher; it also sweeps newly started Safari sync services while preserving the pre-run baseline. The lock is shared with existing real-STP checks. Launch is asynchronous and bounded; cleanup confirms process exit before succeeding.
+
+STP, Swift command-line tools, and existing Accessibility/Screen Recording permissions are
+required. Missing permissions fail without requesting a prompt. Placement keeps a 20-point band below maximized owner windows; capture checks page visibility. Hiding, minimising or fully covering the window stops rendering. A focus-guard failure aborts the run;
+it is not a passed screenshot. A viewport width Safari cannot provide fails instead of writing a
+mislabelled image; a height the display cannot fit warns. This transport's native runtime
+acceptance must include frontmost monitoring, viewport cropping and cleanup; mocked tests alone
+do not establish those properties on a machine.
 
 ```js
 // repo-kit.config.mjs; every field is optional
@@ -571,6 +567,10 @@ export default {
   shoot: { url: "http://127.0.0.1:6010", storybookDir: "apps/storybook", slots: 1 },
 };
 ```
+
+The background transport pieces (`acquireLock`, `startPage`, `backgroundLaunchArgs`) are exported
+as `@maxvyshniakov/repo-kit/safari-background` so native gesture harnesses can share the same
+lock and page bridge after adopting this release, instead of maintaining copied launchers.
 
 The module is exported as `@maxvyshniakov/repo-kit/shoot` (`parseShootArgs`, `launchBrowser`, `shootStories`) for a
 check that needs the same engines.
