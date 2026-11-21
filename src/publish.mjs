@@ -15,11 +15,14 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { changelogIssues, changelogPackages } from "./check-changelogs.mjs";
+import { client as githubClient, registryUrl, repositoryOf } from "./github.mjs";
 import { notifyAll } from "./notify.mjs";
 import { versionCommitOf } from "./packages.mjs";
 import { attestationRefusal, publishGatePlan, readAttestation, releaseGate } from "./release-gate.mjs";
 import { runTlsGate } from "./tls.mjs";
 import { resolveToken } from "./token.mjs";
+
+export { registryUrl, repositoryOf as githubRepository };
 
 // The release commit is identified by SHA, not by the checked-out branch's
 // name: a worktree or a detached HEAD at origin/main publishes the same commit
@@ -40,22 +43,10 @@ export function publishArguments(config) {
   return config ? ["publish", `--config=${config}`] : ["publish"];
 }
 
-export function registryUrl(name) {
-  return `https://npm.pkg.github.com/${name.replace("/", "%2f")}`;
-}
-
 /** What --resume still has to do: "publish", "tag" or "done". */
 export function resumePublication({ published, tagExists, tagMatches }) {
   if (tagExists && (!published || !tagMatches)) throw new Error("Release tag and registry do not match this release");
   return tagExists ? "done" : published ? "tag" : "publish";
-}
-
-// Tag only what the registry actually serves.
-async function registryHasVersion(name, version, token) {
-  const response = await fetch(registryUrl(name), { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) return false;
-  const metadata = await response.json();
-  return Boolean(metadata.versions?.[version]);
 }
 
 // With "Block command line pushes that expose my email" on, GitHub declines
@@ -80,12 +71,6 @@ export function tagPushRecovery(tag, message, email) {
   ];
 }
 
-async function githubUser(token) {
-  const response = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
-  if (!response.ok) throw new Error(`GitHub user lookup failed: ${response.status} ${response.statusText}`);
-  return response.json();
-}
-
 /**
  * The commit that introduced the current version into the package's
  * manifest: the release commit, even when later commits touched the file
@@ -93,12 +78,6 @@ async function githubUser(token) {
  */
 export function releaseCommitOf(git, pkg) {
   return typeof pkg.versionCommit === "function" ? pkg.versionCommit(git) : versionCommitOf(git, pkg);
-}
-
-export function githubRepository(remoteUrl) {
-  const match = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/.exec(remoteUrl);
-  if (!match) throw new Error(`origin is not a GitHub repository: ${remoteUrl}`);
-  return match[1];
 }
 
 // The browser and story checks run in the checks workflow, not in the pre-push
@@ -111,13 +90,10 @@ export function checksState(runs) {
   return latest.conclusion === "success" ? "passed" : "failed";
 }
 
-async function waitForChecks(repository, workflow, sha, token) {
-  const url = `https://api.github.com/repos/${repository}/actions/workflows/${workflow}/runs?head_sha=${sha}&per_page=5`;
+async function waitForChecks(github, workflow, sha) {
   const started = Date.now();
   for (;;) {
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
-    if (!response.ok) throw new Error(`${workflow} lookup failed: ${response.status} ${response.statusText}`);
-    const runs = (await response.json()).workflow_runs;
+    const runs = await github.workflowRuns(workflow, sha);
     const state = checksState(runs);
     const waited = Date.now() - started;
     // A push starts the run within seconds; a run lasts well under an hour.
@@ -129,7 +105,7 @@ async function waitForChecks(repository, workflow, sha, token) {
   }
 }
 
-export async function runPublish(config, { resume = false } = {}) {
+export async function runPublish(config, { resume = false, fetch: fetcher = globalThis.fetch } = {}) {
   const { root } = config;
   const workflow = config.publish.checks;
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -163,12 +139,18 @@ export async function runPublish(config, { resume = false } = {}) {
   });
   if (blockers.length) return fail([`Not publishing ${pkg.name}@${pkg.version}:`, ...blockers.map(blocker => `  ${blocker}`)]);
 
+  const github = githubClient({
+    token,
+    repository: () => repositoryOf(git("remote", "get-url", "origin")),
+    fetch: fetcher,
+  });
+
   let action = "publish";
   if (resume) {
     const taggedCommit = tagExists ? git("rev-list", "-n", "1", tag) : undefined;
     const releaseCommit = releaseCommitOf(git, pkg);
     action = resumePublication({
-      published: await registryHasVersion(pkg.name, pkg.version, token),
+      published: await github.registryHasVersion(pkg.name, pkg.version),
       tagExists,
       tagMatches: !tagExists || (git("merge-base", taggedCommit, "HEAD") === taggedCommit
         && git("merge-base", releaseCommit, taggedCommit) === releaseCommit),
@@ -185,7 +167,7 @@ export async function runPublish(config, { resume = false } = {}) {
     try {
       git("push", "origin", tag);
     } catch {
-      const user = await githubUser(token).catch(() => null);
+      const user = await github.user().catch(() => null);
       return fail([
         `Published ${pkg.name}@${pkg.version}, but pushing ${tag} (tagger ${tagger}) failed.`,
         "If GitHub declined it for email privacy (GH007), tag it as the account's noreply address:",
@@ -214,7 +196,7 @@ export async function runPublish(config, { resume = false } = {}) {
   // says so.
   const plan = action === "publish" ? publishGatePlan({ gate, checks: workflow, inActions: Boolean(process.env.GITHUB_ACTIONS) }) : "none";
   if (plan === "attestation") {
-    const attestation = await readAttestation(githubRepository(git("remote", "get-url", "origin")), head, token);
+    const attestation = await readAttestation(repositoryOf(git("remote", "get-url", "origin")), head, token, fetcher);
     if (attestation.state !== "passed") return fail([`Not publishing ${pkg.name}@${pkg.version}: ${attestationRefusal(attestation, head)[0]}`, ...attestationRefusal(attestation, head).slice(1)]);
     console.log(`${attestation.status.context} passed on ${head.slice(0, 7)}: ${attestation.status.description}`);
   } else if (plan === "actions" && gate === "local") {
@@ -222,7 +204,7 @@ export async function runPublish(config, { resume = false } = {}) {
   } else if (plan === "unchecked") {
     console.warn(`publish.checks is false: publishing ${head.slice(0, 7)} without waiting for a checks workflow; the pre-push gate was the only gate.`);
   } else if (plan === "workflow") {
-    const checks = await waitForChecks(githubRepository(git("remote", "get-url", "origin")), workflow, head, token);
+    const checks = await waitForChecks(github, workflow, head);
     if (checks.state !== "passed") {
       return fail([
         `Not publishing ${pkg.name}@${pkg.version}: ${workflow} ${checks.state} on ${head.slice(0, 7)}${checks.url ? ` (${checks.url})` : ""}.`,
@@ -236,7 +218,7 @@ export async function runPublish(config, { resume = false } = {}) {
     const bunfig = path.join(root, "bunfig.toml");
     execFileSync("bun", publishArguments(fs.existsSync(bunfig) ? bunfig : undefined), { cwd: pkg.dir, stdio: "inherit", env: { ...process.env, GITHUB_TOKEN: token } });
   }
-  if (!(await registryHasVersion(pkg.name, pkg.version, token))) {
+  if (!(await github.registryHasVersion(pkg.name, pkg.version))) {
     return fail([`bun publish exited cleanly, but ${registryUrl(pkg.name)} does not serve ${pkg.version}; not tagging.`]);
   }
   execFileSync("git", ["tag", "--annotate", tag, "--message", message], { cwd: root, env: tagEnv });

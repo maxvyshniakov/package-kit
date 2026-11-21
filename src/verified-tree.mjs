@@ -41,7 +41,7 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const API = "https://api.github.com";
+import { API_BASE as API, authHeaders } from "./github.mjs";
 const PLATFORM = /^[a-z0-9]+-[a-z0-9_]+$/;
 
 /** This host's platform, `<os>-<arch>` in Node's names: darwin-arm64, linux-x64. */
@@ -125,7 +125,7 @@ export function accepts(patterns, name) {
 function client(repository, token, fetcher) {
   return async (suffix, { missing } = {}) => {
     const response = await fetcher(`${API}/repos/${repository}${suffix}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+      headers: authHeaders(token, { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }),
     });
     if (missing && (response.status === 404 || response.status === 422)) return missing;
     if (!response.ok) throw new Error(`GET ${suffix}: ${response.status} ${response.statusText}`);

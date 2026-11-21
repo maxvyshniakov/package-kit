@@ -28,10 +28,9 @@ import path from "node:path";
 
 import { SOFTWARE_SWITCHES, compositingStatus, defaultBrowsersPath, playwrightChromium, shadowBrowsers, softwareCompositing } from "./chromium.mjs";
 import { CONFIG_FILE, loadConfig } from "./config.mjs";
+import { client as githubClient, repositoryOf } from "./github.mjs";
 import { leaseSelf } from "./heavy.mjs";
 import { cleanEnvironment, verifyCommand } from "./pre-push.mjs";
-// publish.mjs imports this module too; both use each other only at call time.
-import { githubRepository } from "./publish.mjs";
 import { runTlsGate } from "./tls.mjs";
 import { TOKEN_HINT, resolveToken } from "./token.mjs";
 import { KIT_VERSION, bunTooOld, localBunVersion } from "./toolchain.mjs";
@@ -151,26 +150,9 @@ export function runCiGate(config, env = process.env) {
   return 0;
 }
 
-const api = (repository, suffix) => `https://api.github.com/repos/${repository}${suffix}`;
-const headers = token => ({ Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" });
-
 /** The local gate's state on `sha`, from GitHub's statuses. */
 export async function readAttestation(repository, sha, token, fetcher = fetch) {
-  const response = await fetcher(api(repository, `/commits/${sha}/statuses?per_page=100`), { headers: headers(token) });
-  if (!response.ok) throw new Error(`status lookup for ${sha.slice(0, 7)} failed: ${response.status} ${response.statusText}`);
-  return attestationState(await response.json());
-}
-
-async function postStatus(repository, sha, body, token, fetcher) {
-  const response = await fetcher(api(repository, `/statuses/${sha}`), { method: "POST", headers: headers(token), body: JSON.stringify(body) });
-  if (response.ok) return { ok: true };
-  const message = await response.json().then(json => json.message, () => "");
-  return { ok: false, unknownCommit: response.status === 422 && /No commit found/i.test(message), message: `${response.status} ${response.statusText} ${message}`.trim() };
-}
-
-async function commitKnown(repository, sha, token, fetcher) {
-  const response = await fetcher(api(repository, `/commits/${sha}`), { headers: headers(token) });
-  return response.ok;
+  return attestationState(await githubClient({ token, repository, fetch: fetcher }).statuses(sha));
 }
 
 export const PASSED_RECORD = "passed";
@@ -270,7 +252,8 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   const gate = releaseGate(config);
   const [context, ...legacyContexts] = localContexts(platform, arch);
   const { token, source } = tokenSource ? { token: tokenSource() } : resolveToken(env);
-  const repository = () => githubRepository(git("remote", "get-url", "origin"));
+  const repository = () => repositoryOf(git("remote", "get-url", "origin"));
+  const github = githubClient({ token, repository, fetch: fetcher });
   const fail = lines => {
     for (const line of [lines].flat()) stderr.write(`${line}\n`);
     return 1;
@@ -282,12 +265,12 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   const attest = async ({ passed, seconds, browser }) => {
     if (!options.attest) return passed ? 0 : 1;
     const description = statusDescription({ passed, host, platform, kitVersion: KIT_VERSION, seconds, log: logLabel, browser });
-    const posted = await postStatus(repository(), sha, { state: passed ? "success" : "failure", context, description }, token, fetcher);
+    const posted = await github.postStatus(sha, { state: passed ? "success" : "failure", context, description });
     if (posted.ok) {
       print(`release-gate: recorded "${context}" = ${passed ? "success" : "failure"} on ${short}: ${description}`);
       // The deprecated name, for a protection rule that still requires it; publish and verified-tree need the new one only.
       for (const legacy of legacyContexts) {
-        const old = await postStatus(repository(), sha, { state: passed ? "success" : "failure", context: legacy, description }, token, fetcher);
+        const old = await github.postStatus(sha, { state: passed ? "success" : "failure", context: legacy, description });
         if (old.ok) print(`release-gate: also recorded the deprecated "${legacy}"`);
         else stderr.write(`release-gate: warning: the deprecated "${legacy}" was not recorded (${old.message}); a protection rule requiring it will wait\n`);
       }
@@ -305,7 +288,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   if (!options.rerun && passedBefore.has(sha)) {
     print(`release-gate: ${short} passed the release gate on this machine (${logLabel}); not running it again (--rerun does).`);
     if (!options.attest) return 0;
-    const current = await readAttestation(repository(), sha, token, fetcher);
+    const current = attestationState(await github.statuses(sha));
     if (current.state === "passed") {
       print(`release-gate: ${short} is already attested: ${current.status.context}: ${current.status.description}`);
       return 0;
@@ -320,7 +303,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   if (tooOld) return fail(`release-gate: ${tooOld}.`);
   if (!tls()) return fail("release-gate: the TLS gate failed (README.md#tls-gate); nothing was installed.");
   if (token && source && source !== "GITHUB_TOKEN") print(`release-gate: GITHUB_TOKEN unset; using ${source}.`);
-  if (options.attest && !(await commitKnown(repository(), sha, token, fetcher))) {
+  if (options.attest && !(await github.hasCommit(sha))) {
     print(`release-gate: GitHub does not have ${short} yet. The gate runs; push the commit, then run it again to record the attestation.`);
   }
 
