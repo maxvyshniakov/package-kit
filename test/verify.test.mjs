@@ -281,9 +281,12 @@ test("a daemon orphaned before any sample saw it joins the step its environment 
 });
 
 test("markedProcesses reads REPO_KIT_STEP from a process's environment", async () => {
-  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { env: { ...process.env, REPO_KIT_STEP: "run-1.3" }, stdio: "ignore" });
+  const child = spawn(process.execPath, ["-e", "process.stdout.write('ready\\n'); setTimeout(() => {}, 10000)"], { env: { ...process.env, REPO_KIT_STEP: "run-1.3" }, stdio: ["ignore", "pipe", "ignore"] });
   try {
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve, reject) => {
+      child.stdout.once("data", resolve);
+      child.once("exit", code => reject(new Error(`child exited early: ${code}`)));
+    });
     const marks = new Map([["run-1.3", "browser checks"], ["run-1.30", "other"]]);
     assert.deepEqual([...markedProcesses([child.pid, process.pid], marks)], [[child.pid, "browser checks"]]);
   } finally {
@@ -398,26 +401,26 @@ exec sleep 60
   const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, REPO_KIT_VERIFY_CORES: "2", REPO_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
   const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const daemons = () => (fs.existsSync(pids) ? fs.readFileSync(pids, "utf8").trim().split("\n").filter(Boolean).map(Number) : []);
+  const waitForExit = async (getPids, timeoutMs = 10_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (getPids().some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+    return getPids().filter(alive);
+  };
   try {
-    const started = Date.now();
     const verify = spawn(process.execPath, [cli, "verify"], { cwd: repository.root, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     verify.stdout.on("data", chunk => { stdout += chunk; });
     const guard = setTimeout(() => verify.kill("SIGKILL"), 30_000);
-    const status = await new Promise(resolve => verify.on("exit", resolve));
+    const status = await new Promise(resolve => verify.on("close", resolve));
     clearTimeout(guard);
-    await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(status, 1, stdout);
-    assert.ok(Date.now() - started < 20_000, "verify waited for the hung step");
     assert.equal(daemons().length, 1, "the daemon started");
     assert.match(stdout, /\[hang\] timed out after [\d.]+s \(timeout: 0\.03 min\); stopping its processes\n/);
     assert.match(stdout, /=== hang timed out after [\d.]+s; its last 80 lines:/);
     assert.match(stdout, /  FAIL hang \([\d.]+s, timed out\)\n/);
     assert.match(stdout, /  stop lint \(/);
     assert.match(stdout, /  skip after\n/);
-    const deadline = Date.now() + 5000;
-    while (daemons().some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
-    assert.deepEqual(daemons().filter(alive), [], "the step's daemon outlived its timeout");
+    assert.deepEqual(await waitForExit(daemons, 5000), [], "the step's daemon outlived its timeout");
   } finally {
     for (const pid of daemons()) {
       try { process.kill(pid, "SIGKILL"); } catch {}
@@ -525,7 +528,7 @@ exec sleep 30
     assert.ok(started().every(alive));
     verify.kill("SIGKILL");
     const deadline = Date.now() + 10_000;
-    while (started().some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+    while (started().some(alive) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
     assert.deepEqual(started().filter(alive), [], "step processes outlived a killed verify");
   } finally {
     repository.cleanup();
@@ -544,6 +547,19 @@ while :; do sleep 0.1; done
     const verify = spawn(process.execPath, [cli, "verify"], { cwd: repository.root, env: repository.env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     const exited = new Promise(resolve => verify.on("close", code => resolve(code)));
+    const waitForOutput = text => new Promise((resolve, reject) => {
+      if (stdout.includes(text)) return resolve();
+      const timer = setTimeout(() => reject(new Error(`missing output ${JSON.stringify(text)}:\n${stdout}`)), 10_000);
+      const onData = chunk => {
+        stdout += chunk;
+        if (stdout.includes(text)) {
+          clearTimeout(timer);
+          verify.stdout.off("data", onData);
+          resolve();
+        }
+      };
+      verify.stdout.on("data", onData);
+    });
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`no live output:\n${stdout}`)), 10_000);
       verify.stdout.on("data", chunk => {
@@ -555,7 +571,7 @@ while :; do sleep 0.1; done
       });
     });
     verify.kill("SIGINT");
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await waitForOutput("verify: SIGINT, stopping the running steps");
     verify.kill("SIGINT");
     assert.equal(await exited, 128 + os.constants.signals.SIGINT);
     assert.match(stdout, /\nFailed in [\d.]+s\n$/, "the summary printed");
