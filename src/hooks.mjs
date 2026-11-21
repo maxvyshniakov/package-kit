@@ -12,10 +12,10 @@
 // with changelog.paths. `hooks.managed` in repo-kit.config.mjs narrows the set.
 // Other files in .githooks belong to the repository.
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { git } from "./git.mjs";
 import { BUN_VERSION } from "./toolchain.mjs";
 
 const kitRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -190,10 +190,6 @@ export function hookIssues(root, config = {}) {
     else if (!(fs.statSync(file).mode & 0o111)) issues.push(`.githooks/${name} is not executable`);
   }
   return issues;
-}
-
-function git(root, ...args) {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
 function insideCheckout(root) {

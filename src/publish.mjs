@@ -15,6 +15,7 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { changelogIssues, changelogPackages } from "./check-changelogs.mjs";
+import { gitRunner } from "./git.mjs";
 import { client as githubClient, registryUrl, repositoryOf } from "./github.mjs";
 import { notifyAll } from "./notify.mjs";
 import { versionCommitOf } from "./packages.mjs";
@@ -108,7 +109,7 @@ async function waitForChecks(github, workflow, sha) {
 export async function runPublish(config, { resume = false, fetch: fetcher = globalThis.fetch } = {}) {
   const { root } = config;
   const workflow = config.publish.checks;
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const git = gitRunner(root);
   const fail = (lines) => {
     for (const line of lines) console.error(line);
     return 1;

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Lanefather's verification command contract over the consumer's Repo-Kit steps.
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
+import { cleanEnvironment, gitRunner } from './git.mjs';
 import { readCapacity, runVerify, verifySteps } from './verify.mjs';
-import { cleanEnvironment } from './pre-push.mjs';
 import { leaseSelf, verifyLeaseSlots } from './heavy.mjs';
 import { applyScopeArgs, changedPaths, planChecks, planSmoke } from './plan.mjs';
 
@@ -93,7 +92,7 @@ export async function main(args) {
   try { phase = JSON.parse(gitEnv.REPO_KIT_SLOT_META || '{}').phase || phase; } catch { /* leasedCommand reports bad metadata */ }
   const lease = Number.isFinite(jobs) && !gitEnv.SLOTFATHER_LEASE ? laneLeaseSlots(config, selected, jobs, { gibPerSlot: readCapacity().gib_per_slot ?? 0 }) : laneLeaseSlots(config, selected, jobs);
   if (await leaseSelf(verifyLeaseSlots(lease), { env: gitEnv, purpose: phase })) return process.exitCode;
-  const git = (...argv) => execFileSync('git', argv, { cwd: config.root, encoding: 'utf8', env: gitEnv }).trim();
+  const git = gitRunner(config.root, { env: gitEnv });
   const head = git('rev-parse', 'HEAD'), tree = git('rev-parse', 'HEAD^{tree}');
   if (git('status', '--porcelain')) throw new Error('verification requires a clean committed checkout');
   const directory = path.resolve(config.root, git('rev-parse', '--git-path', 'repo-kit-verification'));

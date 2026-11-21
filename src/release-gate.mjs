@@ -21,19 +21,21 @@
 // wait for them, and the Storybook deploy (`repo-kit ci-gate`) runs whatever
 // they concluded. Under gate "ci" publish waits for the checks workflow and the
 // deploy runs only after every job it needs passed.
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { SOFTWARE_SWITCHES, compositingStatus, defaultBrowsersPath, playwrightChromium, shadowBrowsers, softwareCompositing } from "./chromium.mjs";
-import { CONFIG_FILE, loadConfig } from "./config.mjs";
+import { passedRecord, trapSignals, verifyCommands, withCommitWorktree } from "./commit-check.mjs";
+import { cleanEnvironment, commonGitDir, gitRunner } from "./git.mjs";
 import { client as githubClient, repositoryOf } from "./github.mjs";
 import { leaseSelf } from "./heavy.mjs";
-import { cleanEnvironment, verifyCommand } from "./pre-push.mjs";
 import { runTlsGate } from "./tls.mjs";
 import { TOKEN_HINT, resolveToken } from "./token.mjs";
 import { KIT_VERSION, bunTooOld, localBunVersion } from "./toolchain.mjs";
+
+export { verifyCommands as gateCommands };
 
 export const GATES = ["local", "ci"];
 const CONTEXT_PREFIX = "Library checks (local";
@@ -158,11 +160,13 @@ export async function readAttestation(repository, sha, token, fetcher = fetch) {
 export const PASSED_RECORD = "passed";
 
 /** Commits that passed on this machine: "<sha> <seconds>" per line; sha to seconds. */
-function readPassed(recordDir) {
-  const file = path.join(recordDir, PASSED_RECORD);
-  const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
-  return new Map(lines.map(line => line.split(" ")).map(([sha, seconds]) => [sha, Number(seconds) || 0]));
-}
+const gateRecord = recordDir => passedRecord(recordDir, PASSED_RECORD, {
+  parse: line => {
+    const [sha, seconds] = line.split(" ");
+    return [sha, Number(seconds) || 0];
+  },
+  format: (sha, seconds) => `${sha} ${Math.round(seconds)}`,
+});
 
 /**
  * Prepares Chromium with software compositing for a worktree: installs the
@@ -201,21 +205,6 @@ export async function softwareChromium({ worktree, env, step }) {
   }
 }
 
-/**
- * The commands that verify a checked-out commit: { release, browser } as
- * [file, args], browser undefined when it declares no browser checks. A commit
- * from before the repository took its gate from repo-kit has no
- * repo-kit.config.mjs; its own verify and verify:browser scripts run, as the
- * pre-push hook runs them.
- */
-export async function gateCommands(worktree) {
-  const manifest = path.join(worktree, "package.json");
-  const scripts = fs.existsSync(manifest) ? JSON.parse(fs.readFileSync(manifest, "utf8")).scripts ?? {} : {};
-  const configBrowser = fs.existsSync(path.join(worktree, CONFIG_FILE)) && Boolean((await loadConfig(worktree)).verify?.browser);
-  const browser = scripts["verify:browser"] ? ["bun", ["run", "verify:browser"]] : configBrowser ? ["bun", ["run", "verify", "--", "--browser"]] : undefined;
-  return { release: verifyCommand(worktree, true), browser };
-}
-
 function parseArguments(args) {
   const known = new Set(["--no-attest", "--rerun"]);
   for (const arg of args) if (arg.startsWith("--") && !known.has(arg)) throw new Error(`release-gate: unknown option ${arg}`);
@@ -242,11 +231,12 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   const print = line => stdout.write(`${line}\n`);
   const options = parseArguments(args);
   const gitEnv = cleanEnvironment(env);
-  const git = (...gitArgs) => execFileSync("git", gitArgs, { cwd: config.root, encoding: "utf8", env: gitEnv, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const git = gitRunner(config.root, { env: gitEnv });
   const sha = git("rev-parse", "--verify", `${options.ref}^{commit}`);
   const short = sha.slice(0, 12);
-  const gitDir = path.resolve(config.root, git("rev-parse", "--git-common-dir"));
+  const gitDir = commonGitDir(config.root, gitEnv);
   const recordDir = path.join(gitDir, "repo-kit-gate");
+  const passedStore = gateRecord(recordDir);
   const logFile = path.join(recordDir, `${short}.log`);
   const logLabel = path.relative(path.dirname(gitDir), logFile);
   const gate = releaseGate(config);
@@ -284,8 +274,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
     return fail(`release-gate: recording the status on ${short} failed: ${posted.message}`);
   };
 
-  const passedBefore = readPassed(recordDir);
-  if (!options.rerun && passedBefore.has(sha)) {
+  if (!options.rerun && passedStore.has(sha)) {
     print(`release-gate: ${short} passed the release gate on this machine (${logLabel}); not running it again (--rerun does).`);
     if (!options.attest) return 0;
     const current = attestationState(await github.statuses(sha));
@@ -293,7 +282,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
       print(`release-gate: ${short} is already attested: ${current.status.context}: ${current.status.description}`);
       return 0;
     }
-    return attest({ passed: true, seconds: passedBefore.get(sha) });
+    return attest({ passed: true, seconds: passedStore.get(sha) });
   }
 
   const browserConfigured = Boolean(config.verify?.browser);
@@ -313,35 +302,8 @@ export async function runReleaseGate(config, args = [], deps = {}) {
     stream.write(text);
     fs.writeSync(out, typeof text === "string" ? text : Buffer.from(text));
   };
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-release-gate-"));
   let stepEnv = { ...gitEnv, ...(token ? { GITHUB_TOKEN: token } : {}) };
-  let current;
-  let stopped;
-  const forward = signal => {
-    stopped = signal;
-    current?.kill(signal);
-  };
-  const onInterrupt = () => { stopped = "SIGINT"; };
-  process.on("SIGTERM", forward);
-  process.on("SIGHUP", forward);
-  process.on("SIGINT", onInterrupt);
-  const step = (label, file, stepArgs, extraEnv = {}) => new Promise(resolve => {
-    if (stopped) return resolve(1);
-    say(`\n== ${label}: ${[file, ...stepArgs].join(" ")}\n`);
-    const child = spawn(file, stepArgs, { cwd: worktree, env: { ...stepEnv, ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
-    current = child;
-    child.stdout.on("data", chunk => say(chunk));
-    child.stderr.on("data", chunk => say(chunk, stderr));
-    child.on("error", error => {
-      say(`${file}: ${error.message}\n`, stderr);
-      resolve(127);
-    });
-    child.on("close", (code, signal) => {
-      current = undefined;
-      resolve(code ?? 128 + os.constants.signals[signal]);
-    });
-  });
-
+  const signals = trapSignals();
   const started = Date.now();
   const results = [];
   const record = (name, ok, detail = "") => results.push({ name, ok, detail });
@@ -353,66 +315,78 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   };
   let chromium;
   let launches;
-  say(`release-gate: ${short} (${options.ref}) in ${worktree}, repo-kit ${KIT_VERSION}, log ${logFile}\n`);
-  say(`release-gate: TLS gate passed; slotfather lease ${env.SLOTFATHER_LEASE ? `${env.SLOTFATHER_LEASE} (${env.SLOTFATHER_COUNT ?? "?"} slots)` : "none"}\n`);
   try {
-    git("worktree", "add", "--detach", worktree, sha);
-    let ok = await timed("install", () => step("install", "bun", ["install", "--frozen-lockfile"]));
-    let commands = {};
-    if (ok) {
-      try {
-        commands = await gateCommands(worktree);
-        if (!commands.release) throw new Error(`${short} has no verify script: nothing to gate`);
-        chromium = await prepareChromium({ worktree, env: stepEnv, step });
-        if (chromium) {
-          stepEnv = { ...stepEnv, ...chromium.env };
-          say(`\nrelease-gate: Chromium for every check: ${chromium.summary}\n`);
-          record("software Chromium", true, chromium.summary);
-        } else {
-          say("\nrelease-gate: no Playwright in this commit, so no Chromium to start with software compositing.\n");
-        }
-        if (commands.browser && !chromium) {
-          record("software Chromium", false, "no Playwright");
-          say("release-gate: verify.browser is configured, but this commit has no Playwright: the gate cannot start its Chromium with software compositing as CI did.\n", stderr);
+    return await withCommitWorktree(config.root, sha, async worktree => {
+      const step = (label, file, stepArgs, extraEnv = {}) => new Promise(resolve => {
+        if (signals.stopped) return resolve(1);
+        say(`\n== ${label}: ${[file, ...stepArgs].join(" ")}\n`);
+        const child = spawn(file, stepArgs, { cwd: worktree, env: { ...stepEnv, ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
+        signals.track(child);
+        child.stdout.on("data", chunk => say(chunk));
+        child.stderr.on("data", chunk => say(chunk, stderr));
+        child.on("error", error => {
+          say(`${file}: ${error.message}\n`, stderr);
+          resolve(127);
+        });
+        child.on("close", (code, signal) => {
+          signals.track(undefined);
+          resolve(code ?? 128 + os.constants.signals[signal]);
+        });
+      });
+
+      say(`release-gate: ${short} (${options.ref}) in ${worktree}, repo-kit ${KIT_VERSION}, log ${logFile}\n`);
+      say(`release-gate: TLS gate passed; slotfather lease ${env.SLOTFATHER_LEASE ? `${env.SLOTFATHER_LEASE} (${env.SLOTFATHER_COUNT ?? "?"} slots)` : "none"}\n`);
+      let ok = await timed("install", () => step("install", "bun", ["install", "--frozen-lockfile"]));
+      let commands = {};
+      if (ok) {
+        try {
+          commands = await verifyCommands(worktree);
+          if (!commands.release) throw new Error(`${short} has no verify script: nothing to gate`);
+          chromium = await prepareChromium({ worktree, env: stepEnv, step });
+          if (chromium) {
+            stepEnv = { ...stepEnv, ...chromium.env };
+            say(`\nrelease-gate: Chromium for every check: ${chromium.summary}\n`);
+            record("software Chromium", true, chromium.summary);
+          } else {
+            say("\nrelease-gate: no Playwright in this commit, so no Chromium to start with software compositing.\n");
+          }
+          if (commands.browser && !chromium) {
+            record("software Chromium", false, "no Playwright");
+            say("release-gate: verify.browser is configured, but this commit has no Playwright: the gate cannot start its Chromium with software compositing as CI did.\n", stderr);
+            ok = false;
+          }
+        } catch (error) {
+          record("software Chromium", false, error.message);
+          say(`release-gate: ${error.message}\n`, stderr);
           ok = false;
         }
-      } catch (error) {
-        record("software Chromium", false, error.message);
-        say(`release-gate: ${error.message}\n`, stderr);
-        ok = false;
       }
-    }
-    ok = ok && await timed("verify --release", () => step("verify --release", ...commands.release));
-    if (ok && commands.browser) {
-      ok = await timed("verify --browser", () => step("verify --browser", ...commands.browser));
-      launches = chromium.launches();
-      if (ok && launches === 0) {
-        record("software Chromium launches", false, "none");
-        say("release-gate: the browser checks started no Chromium through the software-compositing wrapper, so they did not run as on CI.\n", stderr);
-        ok = false;
+      ok = ok && await timed("verify --release", () => step("verify --release", ...commands.release));
+      if (ok && commands.browser) {
+        ok = await timed("verify --browser", () => step("verify --browser", ...commands.browser));
+        launches = chromium.launches();
+        if (ok && launches === 0) {
+          record("software Chromium launches", false, "none");
+          say("release-gate: the browser checks started no Chromium through the software-compositing wrapper, so they did not run as on CI.\n", stderr);
+          ok = false;
+        } else if (ok) {
+          record("software Chromium launches", true, `${launches} Chromium launches with ${SOFTWARE_SWITCHES.join(" ")}`);
+        }
       } else if (ok) {
-        record("software Chromium launches", true, `${launches} Chromium launches with ${SOFTWARE_SWITCHES.join(" ")}`);
+        say("\nrelease-gate: no verify.browser in this commit's repo-kit.config.mjs and no verify:browser script; no browser checks to run.\n");
       }
-    } else if (ok) {
-      say("\nrelease-gate: no verify.browser in this commit's repo-kit.config.mjs and no verify:browser script; no browser checks to run.\n");
-    }
-    const seconds = (Date.now() - started) / 1000;
-    const passed = ok && !stopped;
-    say(`\nrelease-gate ${short}:\n`);
-    for (const { name, ok: good, detail } of results) say(`  ${good ? "ok  " : "FAIL"} ${name}${detail ? ` (${detail})` : ""}\n`);
-    say(`${passed ? "Passed" : stopped ? `Stopped (${stopped})` : "Failed"} in ${duration(seconds)}; log ${logFile}\n`);
-    if (stopped) return 128 + os.constants.signals[stopped];
-    if (passed) fs.appendFileSync(path.join(recordDir, PASSED_RECORD), `${sha} ${Math.round(seconds)}\n`);
-    return await attest({ passed, seconds, browser: launches });
+      const seconds = (Date.now() - started) / 1000;
+      const passed = ok && !signals.stopped;
+      say(`\nrelease-gate ${short}:\n`);
+      for (const { name, ok: good, detail } of results) say(`  ${good ? "ok  " : "FAIL"} ${name}${detail ? ` (${detail})` : ""}\n`);
+      say(`${passed ? "Passed" : signals.stopped ? `Stopped (${signals.stopped})` : "Failed"} in ${duration(seconds)}; log ${logFile}\n`);
+      if (signals.stopped) return signals.exitCode();
+      if (passed) passedStore.add(sha, seconds);
+      return await attest({ passed, seconds, browser: launches });
+    }, { prefix: "repo-kit-release-gate-", env: gitEnv });
   } finally {
-    process.off("SIGTERM", forward);
-    process.off("SIGHUP", forward);
-    process.off("SIGINT", onInterrupt);
+    signals.dispose();
     chromium?.cleanup();
-    try {
-      execFileSync("git", ["worktree", "remove", "--force", worktree], { cwd: config.root, env: gitEnv, stdio: "ignore" });
-    } catch {}
-    fs.rmSync(worktree, { recursive: true, force: true });
     fs.closeSync(out);
   }
 }
