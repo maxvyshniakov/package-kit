@@ -9,7 +9,8 @@ import { changelogPackages } from './check-changelogs.mjs';
 import { chooseVersionSource } from './version-source.mjs';
 import { resolveToken } from './token.mjs';
 import { runTlsGate } from './tls.mjs';
-import { publishArguments, registryUrl } from './publish.mjs';
+import { client as githubClient } from './github.mjs';
+import { publishArguments } from './publish.mjs';
 
 export function parsePrereleaseOptions(args) {
  const result={dryRun:false};
@@ -65,12 +66,8 @@ export async function runPrerelease(config,options = {}, { tls = runTlsGate, tok
   if(!pkg||others.length) throw new Error('Prerelease publishing requires exactly one npm package');
   const manifestPath=path.join(pkg.dir,'package.json');
   if(!fs.existsSync(manifestPath)) throw new Error('Prerelease publishing requires package.json');
-  const metadata=async()=>{
-   const response=await request(registryUrl(pkg.name),{headers:{Authorization:`Bearer ${token}`}});
-   if(response.status===404)return {versions:{},'dist-tags':{}};
-   if(!response.ok)throw new Error(`Registry lookup failed: ${response.status}`);
-   return response.json();
-  };
+  const github=githubClient({token,fetch:request});
+  const metadata=()=>github.registryMetadata(pkg.name);
   const before=await metadata();
   const latest=before['dist-tags']?.latest;
   if(!dryRun && (!/^\d+\.\d+\.\d+$/.test(latest??'') || !before.versions?.[latest])) {

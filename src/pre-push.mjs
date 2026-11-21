@@ -9,13 +9,15 @@
 // push of verified commits takes no slot.
 // `bun install` in the worktree reads GitHub Packages with GITHUB_TOKEN,
 // or with `gh auth token` when GITHUB_TOKEN is unset.
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
+import { passedRecord, trapSignals, verifyCommand, withCommitWorktree } from "./commit-check.mjs";
+import { cleanEnvironment, commonGitDir } from "./git.mjs";
 import { resolveToken, TOKEN_HINT } from "./token.mjs";
 import { bunTooOld, localBunVersion } from "./toolchain.mjs";
+
+export { cleanEnvironment, verifyCommand };
 
 const ZERO = /^0+$/;
 const RELEASE_BRANCHES = ["main"];
@@ -24,6 +26,8 @@ const RELEASE_BRANCHES = ["main"];
 // directory. Earlier copies of this hook used the other names.
 export const VERIFIED_RECORD = "repo-kit-verified";
 const LEGACY_RECORDS = ["sid-kit-verified", "verified-commits"];
+
+const verifiedRecord = gitDir => passedRecord(gitDir, VERIFIED_RECORD, { legacy: LEGACY_RECORDS });
 
 /** Git passes "<local ref> <local sha> <remote ref> <remote sha>" per line. */
 export function commitsToVerify(stdin, releaseBranches = RELEASE_BRANCHES) {
@@ -59,7 +63,7 @@ export function pendingCommits(stdin, verified, releaseBranches = RELEASE_BRANCH
  * to run nothing.
  */
 export function pushedCommits(stdin, env = cleanEnvironment(), releaseBranches = RELEASE_BRANCHES) {
-  const left = pendingCommits(stdin, readVerified(commonGitDir(env)), releaseBranches);
+  const left = pendingCommits(stdin, readVerified(commonGitDir(process.cwd(), env)), releaseBranches);
   const passed = commitsToVerify(stdin, releaseBranches).filter(({ sha, release }) => !left.some(commit => commit.sha === sha && commit.release === release));
   return { passed, left };
 }
@@ -68,44 +72,14 @@ export function reportPassed(passed) {
   for (const { sha, release } of passed) console.log(`pre-push: ${sha.slice(0, 10)} already passed ${verifyLabel(release)}`);
 }
 
-function commonGitDir(env) {
-  return path.resolve(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env }).trim());
-}
-
-// Hooks run with GIT_DIR and friends pointing at this checkout; commands in
-// the temporary worktree must resolve their own.
-export function cleanEnvironment(env = process.env) {
-  const clean = { ...env };
-  for (const name of Object.keys(clean)) {
-    if (/^GIT_(DIR|WORK_TREE|INDEX_FILE|PREFIX|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|QUARANTINE_PATH)$/.test(name)) {
-      delete clean[name];
-    }
-  }
-  return clean;
-}
-
 export function readVerified(gitDir) {
-  const keys = new Set();
-  for (const name of [VERIFIED_RECORD, ...LEGACY_RECORDS]) {
-    const file = path.join(gitDir, name);
-    if (fs.existsSync(file)) for (const line of fs.readFileSync(file, "utf8").split("\n")) if (line) keys.add(line);
-  }
-  return keys;
-}
-
-/** The command that verifies a checked-out commit, or undefined when it predates any gate. */
-export function verifyCommand(worktree, release) {
-  const manifest = path.join(worktree, "package.json");
-  const scripts = fs.existsSync(manifest) ? JSON.parse(fs.readFileSync(manifest, "utf8")).scripts ?? {} : {};
-  if (scripts.verify) return ["bun", ["run", "verify", ...(release ? ["--", "--release"] : [])]];
-  if (fs.existsSync(path.join(worktree, "scripts/verify.mjs"))) return ["node", ["scripts/verify.mjs", ...(release ? ["--release"] : [])]];
-  return undefined;
+  return verifiedRecord(gitDir).keys();
 }
 
 export function runPrePush({ stdin = fs.readFileSync(0, "utf8"), releaseBranches = RELEASE_BRANCHES } = {}) {
   const env = cleanEnvironment();
-  const git = (...args) => execFileSync("git", args, { encoding: "utf8", env }).trim();
-  const gitDir = commonGitDir(env);
+  const root = process.cwd();
+  const record = verifiedRecord(commonGitDir(root, env));
   const { passed, left: commits } = pushedCommits(stdin, env, releaseBranches);
   reportPassed(passed);
   if (!commits.length) return 0;
@@ -124,41 +98,35 @@ export function runPrePush({ stdin = fs.readFileSync(0, "utf8"), releaseBranches
   // A signal lands while spawnSync waits for a step; the step ends (Ctrl-C
   // reaches its process group too), the temporary worktree is removed, and the
   // hook then exits with the signal's code instead of verifying further commits.
-  let stopped;
-  const stop = signal => { stopped = signal; };
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, stop);
-
-  for (const { sha, release } of commits) {
-    const key = verifiedKey(sha, release);
-    const label = verifyLabel(release);
-    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-pre-push-"));
-    console.log(`pre-push: ${label} on ${sha.slice(0, 10)} in ${worktree}`);
-    console.log("pre-push: skip once with git push --no-verify");
-    let passed = false;
-    try {
-      git("worktree", "add", "--detach", worktree, sha);
-      const command = verifyCommand(worktree, release);
-      if (!command) {
-        console.log(`pre-push: ${sha.slice(0, 10)} has no verify script; nothing to run`);
-        passed = true;
-      } else {
-        const run = (file, args) => !stopped && spawnSync(file, args, { cwd: worktree, stdio: "inherit", env }).status === 0 && !stopped;
-        passed = run("bun", ["install", "--frozen-lockfile"]) && run(...command);
+  const signals = trapSignals();
+  try {
+    for (const { sha, release } of commits) {
+      const key = verifiedKey(sha, release);
+      const label = verifyLabel(release);
+      const ok = withCommitWorktree(root, sha, worktree => {
+        console.log(`pre-push: ${label} on ${sha.slice(0, 10)} in ${worktree}`);
+        console.log("pre-push: skip once with git push --no-verify");
+        const command = verifyCommand(worktree, release);
+        if (!command) {
+          console.log(`pre-push: ${sha.slice(0, 10)} has no verify script; nothing to run`);
+          return true;
+        }
+        const run = (file, args) => !signals.stopped && spawnSync(file, args, { cwd: worktree, stdio: "inherit", env }).status === 0 && !signals.stopped;
+        return run("bun", ["install", "--frozen-lockfile"]) && run(...command);
+      }, { prefix: "repo-kit-pre-push-", env });
+      if (signals.stopped) {
+        console.error(`\npre-push: ${signals.stopped}; nothing was pushed.`);
+        return signals.exitCode();
       }
-    } finally {
-      spawnSync("git", ["worktree", "remove", "--force", worktree], { env, stdio: "ignore" });
-      fs.rmSync(worktree, { recursive: true, force: true });
+      if (!ok) {
+        console.error(`\npre-push: ${label} failed on ${sha.slice(0, 10)}; nothing was pushed.`);
+        if (!token) console.error(`pre-push: if bun install failed with 401 or 404, ${TOKEN_HINT}`);
+        return 1;
+      }
+      record.add(key);
     }
-    if (stopped) {
-      console.error(`\npre-push: ${stopped}; nothing was pushed.`);
-      return 128 + os.constants.signals[stopped];
-    }
-    if (!passed) {
-      console.error(`\npre-push: ${label} failed on ${sha.slice(0, 10)}; nothing was pushed.`);
-      if (!token) console.error(`pre-push: if bun install failed with 401 or 404, ${TOKEN_HINT}`);
-      return 1;
-    }
-    fs.appendFileSync(path.join(gitDir, VERIFIED_RECORD), `${key}\n`);
+    return 0;
+  } finally {
+    signals.dispose();
   }
-  return 0;
 }

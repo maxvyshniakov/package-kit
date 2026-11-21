@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { parseChangelog } from "./changelog.mjs";
+import { gitResult as git } from "./git.mjs";
 import { globToRegExp as compileGlob, matcher } from "./glob.mjs";
 import { packageManifestPath, readPackageVersion, releasedPackages } from "./packages.mjs";
 import { compareVersions } from "./semver.mjs";
@@ -127,7 +128,7 @@ export function cutsRelease(before, after, version) {
 
 /** The Changelog trailers' values, as git parses the message's trailers. */
 export function changelogTrailers(message, { cwd } = {}) {
-  const result = spawnSync("git", ["interpret-trailers", "--parse"], { cwd, input: message, encoding: "utf8" });
+  const result = git(cwd, ["interpret-trailers", "--parse"], { input: message, allowFailure: true });
   if (result.status !== 0) throw new Error(`git interpret-trailers failed: ${result.stderr.trim()}`);
   return result.stdout.split("\n")
     .map(line => new RegExp(`^${TRAILER}\\s*:\\s*(.*)$`, "i").exec(line))
@@ -177,12 +178,6 @@ export function configuredRules(config) {
   const { paths, versionSource } = config.changelog;
   if (paths === undefined || paths === null) return [];
   return compileRules(paths, releasedPackages(config.root, { versionSource }));
-}
-
-function git(cwd, args, { input, allowFailure = false } = {}) {
-  const result = spawnSync("git", args, { cwd, input, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  if (result.status !== 0 && !allowFailure) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
-  return result;
 }
 
 function reader(cwd, revision) {
@@ -266,7 +261,7 @@ const SCISSORS = /^. -+ >8 -+$/m;
 export function cleanMessage(message, { cwd } = {}) {
   const cut = SCISSORS.exec(message);
   const text = cut ? message.slice(0, cut.index) : message;
-  const result = spawnSync("git", ["stripspace", "--strip-comments"], { cwd, input: text, encoding: "utf8" });
+  const result = git(cwd, ["stripspace", "--strip-comments"], { input: text, allowFailure: true });
   return result.status === 0 ? result.stdout : text;
 }
 
