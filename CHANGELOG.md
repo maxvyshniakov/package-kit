@@ -4,6 +4,8 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-22
+
 ### Added
 
 - Change-aware verification planning (repo-kit#5): steps in `verify.steps` and `verify.browser` may now declare `inputs` (repository-relative path globs with `*`, `?`, `**`, `{a,b}`, trailing `/`, and `!` exclusions), `always: true` (runs on every non-empty change while its `inputs` still own their paths), `cheap: true` (runs in the cheap-first tier before heavier steps; a red cheap step stops heavier steps from starting), `smoke: true` (tags steps for narrow post-merge smoke), and `scopeArgs({ paths, matchedPaths, full, release })` (appends dynamic arguments on scoped runs while full runs stay unfiltered). `verify` also accepts `inert` (tracked paths no check reads), `runner` + `canary` (canary checks when gate config/runner files change), and `smoke` (array or `({ paths, plan, checks }) => ids` for narrow post-merge smoke).
