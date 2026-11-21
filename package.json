@@ -21,12 +21,14 @@
     "./publish": "./src/publish.mjs",
     "./publish-prerelease": "./src/publish-prerelease.mjs",
     "./release": "./src/release.mjs",
+    "./serve": "./src/serve.mjs",
     "./shoot": "./src/shoot.mjs",
     "./friction-contract.json": "./friction-contract.json",
     "./package.json": "./package.json",
     "./safari-background": "./src/safari-background/index.mjs"
   },
   "files": [
+    "bin",
     "src",
     "hooks",
     "friction-contract.json",

@@ -231,6 +231,7 @@ export default {
 | `tls` | The TLS gate (below). |
 | `packed-consumer [--keep]` | Packs, installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
 | `shoot <story id filter...> [<url>\|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]` | [Story screenshots](#story-screenshots) from a running Storybook, under a lease of `shoot.slots`. |
+| `serve <dir> [--port N] [--host 127.0.0.1]` | Dependency-free HTTP/1.1 Keep-Alive [static preview server](#static-preview-server) (`@maxvyshniakov/repo-kit/serve`): high socket backlog (`2048`), `Cache-Control: no-cache` for `.html` and `.json`, `public, max-age=31536000, immutable` for hashed `/assets/*`, path-traversal guard (`403`) and clean MIME types. Use instead of `python3 -m http.server`. |
 | `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `repo-kit.config.mjs` too. |
 | `verified-tree` | In a workflow: links each `REPO_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
 | `friction <log\|report\|export>` | The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `repo-kit.config.mjs`. |
@@ -574,6 +575,27 @@ lock and page bridge after adopting this release, instead of maintaining copied 
 
 The module is exported as `@maxvyshniakov/repo-kit/shoot` (`parseShootArgs`, `launchBrowser`, `shootStories`) for a
 check that needs the same engines.
+
+## Static preview server
+
+```sh
+repo-kit serve apps/storybook/storybook-static --port 6020 --host 127.0.0.1
+```
+
+`repo-kit serve <dir> [--port N] [--host 127.0.0.1]` runs a dependency-free Node HTTP/1.1 Keep-Alive static preview
+server (defaults: `--port 6010 --host 127.0.0.1`, backlog `2048`, `keepAliveTimeout` 65 s). Use it instead of
+`python3 -m http.server` for Storybook static builds and local previews:
+
+- `python3 -m http.server` speaks HTTP/1.0 without Keep-Alive, listens with a 5-connection socket backlog, and sets
+  no `Cache-Control` headers. Behind an HTTP/2 reverse proxy (`tailscale serve`), Safari's cold first load fires
+  ~45 concurrent ES module requests (`assets/*.js`), resetting sockets (`502` / `Importing a module script failed.`)
+  and serving stale `iframe.html` across rebuilds.
+- `repo-kit serve` keeps HTTP/1.1 connections alive with a `2048` listen backlog, supports `GET` and `HEAD`, serves
+  `Cache-Control: no-cache` on `.html` and `.json` (`iframe.html`, `index.json`) and
+  `public, max-age=31536000, immutable` on hashed `/assets/*`, rejects path traversal and escaping symlinks with
+  `403`, answers `404` on missing files, and shuts down cleanly on `SIGINT`/`SIGTERM`.
+- Exported as `@maxvyshniakov/repo-kit/serve` (`startStaticServer`, `parseServeArgs`, `runServe`, `mimeTypeFor`,
+  `cacheControlFor`, `resolveStaticFile`, `MIME_TYPES`).
 
 ## Release gate
 

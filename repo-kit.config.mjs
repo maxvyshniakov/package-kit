@@ -39,6 +39,9 @@ export default {
         const friction = run("node_modules/.bin/repo-kit", ["friction", "help"], { cwd: consumerDir });
         if (friction.status === 0 && friction.stdout.includes("repo-kit friction log")) ok("repo-kit friction loads its shipped contract");
         else fail(`repo-kit friction help exited ${friction.status}:\n${friction.stdout}${friction.stderr}`);
+        const serve = run("node_modules/.bin/repo-kit", ["serve", "--help"], { cwd: consumerDir });
+        if (serve.status === 0 && serve.stdout.includes("Usage: repo-kit serve <dir>")) ok("repo-kit serve runs from packed consumer");
+        else fail(`repo-kit serve --help exited ${serve.status}:\n${serve.stdout}${serve.stderr}`);
       },
     ],
   },

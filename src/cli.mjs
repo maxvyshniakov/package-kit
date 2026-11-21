@@ -11,6 +11,8 @@ const USAGE = `Usage: repo-kit <command>
   shoot <story id filter...> [<storybook url>|--url=] [--theme=light,dark] [--width=1280,375]
         [--browser=chromium,firefox,webkit,safari] [--out=<dir>] [--viewport]
                                    screenshot Storybook stories, under a lease of shoot.slots
+  serve <dir> [--port N] [--host 127.0.0.1]
+                                   HTTP/1.1 Keep-Alive static preview server
   checks                           run REPO_KIT_CHECKS' list of {name, run} in order, as browser.yml does
   verified-tree                    in a workflow: link each REPO_KIT_PLANS plan to a passed result of this tree
   test-hygiene [--init|--update]   shrink-only test rules: fixed sleeps, timing assertions, UI assertions (opt-in)
@@ -66,6 +68,10 @@ export async function main([command, ...args]) {
   if (command === "friction") {
     const { runFriction } = await import("./friction.mjs");
     return runFriction(args);
+  }
+  if (command === "serve") {
+    const { runServe } = await import("./serve.mjs");
+    return runServe(args);
   }
   if (command === "tls") {
     const { runTlsGate } = await import("./tls.mjs");
