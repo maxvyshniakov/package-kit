@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config.mjs';
 import { cleanEnvironment, gitRunner } from './git.mjs';
-import { readCapacity, runVerify, verifySteps } from './verify.mjs';
-import { leaseSelf, verifyLeaseSlots } from './heavy.mjs';
+import { runVerify, verifySteps } from './verify.mjs';
+import { capacity, hasLease, leaseSelf, verifyLeaseSlots } from './slotfather.mjs';
 import { applyScopeArgs, changedPaths, planChecks, planSmoke } from './plan.mjs';
 
 export function configuredChecks(config) {
@@ -90,7 +90,7 @@ export async function main(args) {
   // The label names the lane (REPO_KIT_SLOT_LABEL, from Lanefather) and the phase, e.g. "lane-sk-api-surfaces check".
   let phase = 'check';
   try { phase = JSON.parse(gitEnv.REPO_KIT_SLOT_META || '{}').phase || phase; } catch { /* leasedCommand reports bad metadata */ }
-  const lease = Number.isFinite(jobs) && !gitEnv.SLOTFATHER_LEASE ? laneLeaseSlots(config, selected, jobs, { gibPerSlot: readCapacity().gib_per_slot ?? 0 }) : laneLeaseSlots(config, selected, jobs);
+  const lease = Number.isFinite(jobs) && !hasLease(gitEnv) ? laneLeaseSlots(config, selected, jobs, { gibPerSlot: capacity().gib_per_slot ?? 0 }) : laneLeaseSlots(config, selected, jobs);
   if (await leaseSelf(verifyLeaseSlots(lease), { env: gitEnv, purpose: phase })) return process.exitCode;
   const git = gitRunner(config.root, { env: gitEnv });
   const head = git('rev-parse', 'HEAD'), tree = git('rev-parse', 'HEAD^{tree}');

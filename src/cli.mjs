@@ -33,13 +33,14 @@ const USAGE = `Usage: repo-kit <command>
   notify                           request publish.notify's workflows again
   tls                              the Bun TLS gate
   friction <log|report|export>     the local agent friction journal (repo-kit friction help)
+  rust <cache|toolchain|msrv>      shared Cargo build cache, pinned toolchain preflight and MSRV check
   packed-consumer [--keep]`;
 
 export async function main([command, ...args]) {
   if (command === "heavy") {
     const [slots, ...rest] = args;
     if (!slots || !rest.length) return usage();
-    const { runLeased } = await import("./heavy.mjs");
+    const { runLeased } = await import("./slotfather.mjs");
     return runLeased(slots, rest[0] === "--" ? rest.slice(1) : rest);
   }
   if (command === "checks") {
@@ -92,6 +93,17 @@ export async function main([command, ...args]) {
     const { runServe } = await import("./serve.mjs");
     return runServe(args);
   }
+  if (command === "rust") {
+    const [{ findRoot, loadConfig }, { runRust }] = await Promise.all([import("./config.mjs"), import("./rust.mjs")]);
+    let root = null;
+    try {
+      root = findRoot();
+    } catch {
+      // Repositories without repo-kit.config.mjs run with defaults/CLI flags.
+    }
+    const config = root ? await loadConfig(root) : { root: process.cwd() };
+    return runRust(args, { config, root: config.root });
+  }
   if (command === "tls") {
     const { runTlsGate } = await import("./tls.mjs");
     const unknown = args.filter(arg => arg !== "--offline" && arg !== "--require-registry");
@@ -125,7 +137,7 @@ export async function main([command, ...args]) {
       if (values.plan && !values.changed) throw new Error("verify: --plan requires --changed");
       if (values.base !== undefined && !values.changed) throw new Error("verify: --base requires --changed");
       if (!values.plan) {
-        const { leaseSelf, verifyLeaseSlots } = await import("./heavy.mjs");
+        const { leaseSelf, verifyLeaseSlots } = await import("./slotfather.mjs");
         if (await leaseSelf(verifyLeaseSlots(values.browser ? config.verify.browserSlots : config.verify.slots), { purpose: values.browser ? "verify browser" : "verify" })) return process.exitCode;
       }
       const { runVerify } = await import("./verify.mjs");
@@ -142,7 +154,7 @@ export async function main([command, ...args]) {
       return process.exitCode;
     }
     case "shoot": {
-      const [{ leaseSelf }, { parseShootArgs, runShoot }] = await Promise.all([import("./heavy.mjs"), import("./shoot.mjs")]);
+      const [{ leaseSelf }, { parseShootArgs, runShoot }] = await Promise.all([import("./slotfather.mjs"), import("./shoot.mjs")]);
       // Bad arguments fail before the lease, not after a wait for it.
       parseShootArgs(args, { root: config.root, shoot: config.shoot });
       if (await leaseSelf(config.shoot.slots, { purpose: "shoot" })) return process.exitCode;
@@ -152,7 +164,7 @@ export async function main([command, ...args]) {
       // Read the pushed refs first: a push with nothing left to verify (a tag,
       // a deletion, commits that passed already) takes no slot. The leased run
       // gets them on its stdin.
-      const [{ leaseSelf }, { pushedCommits, reportPassed, runPrePush }] = await Promise.all([import("./heavy.mjs"), import("./pre-push.mjs")]);
+      const [{ leaseSelf }, { pushedCommits, reportPassed, runPrePush }] = await Promise.all([import("./slotfather.mjs"), import("./pre-push.mjs")]);
       const stdin = fs.readFileSync(0, "utf8");
       const { passed, left } = pushedCommits(stdin, undefined, config.prePush.releaseBranches);
       if (!left.length) return reportPassed(passed), 0;
