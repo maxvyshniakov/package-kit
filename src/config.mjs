@@ -74,6 +74,8 @@ export function withDefaults(config) {
     shoot: { url: "http://127.0.0.1:6010", storybookDir: "apps/storybook", slots: 1, ...config.shoot },
     // repo-kit check file-budget / repo-kit file-budget: per-glob line or byte budgets and a shrink-only allowlist.
     fileBudget: { ...config.fileBudget },
+    // repo-kit adopt: newest compatible set of @maxvyshniakov/* packages for a consumer.
+    adopt: { scope: "@maxvyshniakov/", hold: {}, ...config.adopt },
   };
 }
 

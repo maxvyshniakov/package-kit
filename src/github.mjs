@@ -112,5 +112,11 @@ export function client({ token, repository, fetch: fetcher = globalThis.fetch } 
       const metadata = await response.json();
       return Boolean(metadata.versions?.[version]);
     },
+
+    async registryTarball(url) {
+      const response = await fetcher(url, { headers: authHeaders(token) });
+      if (!response.ok) throw new Error(`Tarball download failed: ${response.status}`);
+      return Buffer.from(await response.arrayBuffer());
+    },
   };
 }
