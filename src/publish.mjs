@@ -16,10 +16,10 @@ import fs from "node:fs";
 
 import { changelogIssues, changelogPackages } from "./check-changelogs.mjs";
 import { notifyAll } from "./notify.mjs";
+import { versionCommitOf } from "./packages.mjs";
 import { attestationRefusal, publishGatePlan, readAttestation, releaseGate } from "./release-gate.mjs";
 import { runTlsGate } from "./tls.mjs";
 import { resolveToken } from "./token.mjs";
-import { chooseVersionSource } from "./version-source.mjs";
 
 // The release commit is identified by SHA, not by the checked-out branch's
 // name: a worktree or a detached HEAD at origin/main publishes the same commit
@@ -88,14 +88,11 @@ async function githubUser(token) {
 
 /**
  * The commit that introduced the current version into the package's
- * package.json: the release commit, even when later commits touched the file
+ * manifest: the release commit, even when later commits touched the file
  * (a root package's dependencies or scripts).
  */
 export function releaseCommitOf(git, pkg) {
-  const commits = git("log", "--reverse", "--format=%H", "-S", `"version": "${pkg.version}"`, "--", path.join(pkg.path, "package.json"));
-  const [first] = commits.split("\n").filter(Boolean);
-  if (!first) throw new Error(`no commit sets "version": "${pkg.version}" in ${path.join(pkg.path, "package.json")}`);
-  return first;
+  return typeof pkg.versionCommit === "function" ? pkg.versionCommit(git) : versionCommitOf(git, pkg);
 }
 
 export function githubRepository(remoteUrl) {
@@ -141,11 +138,11 @@ export async function runPublish(config, { resume = false } = {}) {
     return 1;
   };
   const { quickStart, versionSource } = config.changelog;
-  if (chooseVersionSource(root, versionSource) !== "package.json") {
-    return fail(["Not publishing: repo-kit publish uploads npm packages; this repository's version source is pyproject.toml."]);
-  }
-  const [pkg, ...others] = changelogPackages(root, { quickStart });
+  const [pkg, ...others] = changelogPackages(root, { quickStart, versionSource });
   if (!pkg || others.length) return fail(["Not publishing: expected exactly one released package (the root package or one under packages/)."]);
+  if (!pkg.publishable) {
+    return fail([`Not publishing: repo-kit publish uploads npm packages; this repository's version source is ${pkg.manifestFile}.`]);
+  }
   const tag = `v${pkg.version}`;
   const gate = releaseGate(config);
   // Before the token reaches any request.

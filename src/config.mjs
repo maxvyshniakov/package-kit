@@ -17,7 +17,7 @@ import nodeModule from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { chooseVersionSource, readManifestText } from "./version-source.mjs";
+export { releasedPackages } from "./packages.mjs";
 
 export const CONFIG_FILE = "repo-kit.config.mjs";
 
@@ -77,27 +77,4 @@ export function withDefaults(config) {
 
 export function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
-}
-
-/**
- * The packages this repository releases: each directory under packages/ with
- * the version source's manifest (a workspace), or else the root package.
- * `path` is relative to the root ("." for the root package); `manifestFile` is
- * package.json or pyproject.toml (`changelog.versionSource`, version-source.mjs).
- */
-export function releasedPackages(root, { versionSource } = {}) {
-  const manifestFile = chooseVersionSource(root, versionSource);
-  const packagesDir = path.join(root, "packages");
-  const workspace = fs.existsSync(packagesDir)
-    ? fs.readdirSync(packagesDir, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() && fs.existsSync(path.join(packagesDir, entry.name, manifestFile)))
-      .map(entry => `packages/${entry.name}`)
-    : [];
-  return (workspace.length ? workspace : ["."]).map(relative => {
-    const dir = path.join(root, relative);
-    const file = path.join(dir, manifestFile);
-    if (!fs.existsSync(file)) throw new Error(`${path.relative(root, file)} not found; set changelog.versionSource to the file that holds the version`);
-    const { manifest, name, version } = readManifestText(manifestFile, fs.readFileSync(file, "utf8"));
-    return { path: relative, dir, manifest, manifestFile, name, version, workspace: relative !== "." };
-  }).sort((a, b) => a.name.localeCompare(b.name));
 }

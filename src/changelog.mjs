@@ -176,19 +176,4 @@ function trimBlank(lines) {
   return lines.slice(start, end);
 }
 
-// bun.lock records each workspace package's version, but `bun install` leaves
-// it stale when only package.json "version" changes, so releases set it here.
-export function lockfileWorkspaceVersion(lockfile, workspacePath) {
-  const block = new RegExp(`\\n    "${escapeRegExp(workspacePath)}": \\{\\n      "name": "[^"]+",\\n      "version": "([^"]+)",`);
-  return block.exec(lockfile)?.[1];
-}
-
-export function setLockfileWorkspaceVersion(lockfile, workspacePath, version) {
-  const block = new RegExp(`(\\n    "${escapeRegExp(workspacePath)}": \\{\\n      "name": "[^"]+",\\n      "version": ")[^"]+(",)`);
-  if (!block.test(lockfile)) throw new Error(`bun.lock has no workspace entry for ${workspacePath}`);
-  return lockfile.replace(block, `$1${version}$2`);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+export { lockfileWorkspaceVersion, setLockfileWorkspaceVersion } from "./packages.mjs";

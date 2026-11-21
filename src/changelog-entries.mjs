@@ -16,8 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { compareVersions, parseChangelog } from "./changelog.mjs";
-import { releasedPackages } from "./config.mjs";
-import { readManifestText } from "./version-source.mjs";
+import { packageManifestPath, readPackageVersion, releasedPackages } from "./packages.mjs";
 
 export const TRAILER = "Changelog";
 const HINT = `Add a line under "## Unreleased" in that CHANGELOG.md, or end the commit message with the trailer "${TRAILER}: none (<reason>)".`;
@@ -104,7 +103,7 @@ export function compileRules(paths, packages) {
     return {
       pkg,
       changelog: path.posix.join(pkg.path, "CHANGELOG.md"),
-      manifest: path.posix.join(pkg.path, pkg.manifestFile ?? "package.json"),
+      manifest: packageManifestPath(pkg),
       includes,
       include: includes.map(globToRegExp),
       exclude: globs.filter(glob => glob.startsWith("!")).map(glob => globToRegExp(glob.slice(1))),
@@ -177,7 +176,7 @@ export function changeIssues(change, rules, { cwd } = {}) {
     const [before, after] = [change.before(rule.changelog), change.after(rule.changelog)];
     if (unreleasedChanged(before, after)) continue;
     const manifest = change.after(rule.manifest);
-    const version = manifest === undefined ? undefined : manifestVersion(rule.pkg.manifestFile ?? "package.json", manifest);
+    const version = manifest === undefined ? undefined : manifestVersion(rule.pkg, manifest);
     if (cutsRelease(before, after, version)) continue;
     missing.push({ rule, shipped });
   }
@@ -192,9 +191,9 @@ export function changeIssues(change, rules, { cwd } = {}) {
   return issues;
 }
 
-function manifestVersion(source, text) {
+function manifestVersion(pkg, text) {
   try {
-    return readManifestText(source, text).version;
+    return readPackageVersion(pkg, text);
   } catch {
     return undefined;
   }

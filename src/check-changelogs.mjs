@@ -10,10 +10,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { lockfileWorkspaceVersion, parseChangelog, satisfiesCaret } from "./changelog.mjs";
-import { releasedPackages } from "./config.mjs";
+import { parseChangelog, satisfiesCaret } from "./changelog.mjs";
+import { DEFAULT_MANIFEST_FILE, releasedPackages } from "./packages.mjs";
 
-export function changelogIssues({ name, version, changelog, lockedVersion, archiveVersions = [], manifestFile = "package.json" }, { release = false, quickStart = "docs/GETTING_STARTED.md" } = {}) {
+export function changelogIssues({ name, version, changelog, lockedVersion, archiveVersions = [], manifestFile = DEFAULT_MANIFEST_FILE }, { release = false, quickStart = "docs/GETTING_STARTED.md" } = {}) {
   if (changelog === undefined) return ["missing CHANGELOG.md"];
   const parsed = parseChangelog(changelog);
   const issues = [...parsed.errors];
@@ -66,15 +66,13 @@ export function changelogPackages(root, { quickStart = "docs/GETTING_STARTED.md"
   const quickStartText = quickStartPath && fs.existsSync(quickStartPath) ? fs.readFileSync(quickStartPath, "utf8") : "";
   return releasedPackages(root, { versionSource }).map(pkg => {
     const changelogPath = path.join(pkg.dir, "CHANGELOG.md");
-    const archive = new RegExp(`${pkg.name.replace("@", "").replace("/", "-")}-(\\d+\\.\\d+\\.\\d+)\\.tgz`, "g");
     return {
       ...pkg,
       peerDependencies: pkg.manifest.peerDependencies,
       devDependencies: pkg.manifest.devDependencies,
       changelog: fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, "utf8") : undefined,
-      // bun.lock and the quick start's archives name npm packages only.
-      lockedVersion: pkg.workspace && pkg.manifestFile === "package.json" ? lockfileWorkspaceVersion(lockfile, pkg.path) : undefined,
-      archiveVersions: pkg.manifestFile === "package.json" ? [...quickStartText.matchAll(archive)].map(match => match[1]) : [],
+      lockedVersion: pkg.lockfileVersion(lockfile),
+      archiveVersions: pkg.archiveVersionsIn(quickStartText),
     };
   });
 }
