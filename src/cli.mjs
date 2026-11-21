@@ -31,6 +31,7 @@ const USAGE = `Usage: repo-kit <command>
   notify                           request publish.notify's workflows again
   tls                              the Bun TLS gate
   friction <log|report|export>     the local agent friction journal (repo-kit friction help)
+  rust <cache|toolchain|msrv>      shared Cargo build cache, pinned toolchain preflight and MSRV check
   packed-consumer [--keep]`;
 
 export async function main([command, ...args]) {
@@ -72,6 +73,17 @@ export async function main([command, ...args]) {
   if (command === "serve") {
     const { runServe } = await import("./serve.mjs");
     return runServe(args);
+  }
+  if (command === "rust") {
+    const [{ findRoot, loadConfig }, { runRust }] = await Promise.all([import("./config.mjs"), import("./rust.mjs")]);
+    let root = null;
+    try {
+      root = findRoot();
+    } catch {
+      // Repositories without repo-kit.config.mjs run with defaults/CLI flags.
+    }
+    const config = root ? await loadConfig(root) : { root: process.cwd() };
+    return runRust(args, { config, root: config.root });
   }
   if (command === "tls") {
     const { runTlsGate } = await import("./tls.mjs");
