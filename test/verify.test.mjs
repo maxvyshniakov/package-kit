@@ -6,7 +6,10 @@ import path from "node:path";
 import test from "node:test";
 
 import { withDefaults } from "../src/config.mjs";
-import { cgroupMemory, chain, markedProcesses, normalizeSteps, runSteps, sizeSteps, stepProcesses, unitTestWorkers, verifyCores, verifyMemory, verifySteps } from "../src/verify.mjs";
+import { runSlots } from "../src/slotfather.mjs";
+import { unitTestWorkers, verifyCores, verifyMemory } from "../src/verify/budget.mjs";
+import { cgroupMemory, markedProcesses, stepProcesses } from "../src/verify/processes.mjs";
+import { chain, normalizeSteps, runSteps, sizeSteps, verifySteps } from "../src/verify/steps.mjs";
 import { kitRoot, tempRepository } from "./fixtures.mjs";
 
 const names = steps => steps.map(({ name }) => name);
@@ -635,10 +638,39 @@ test("without a slot count every step that is ready starts, as before", async ()
   await run;
 });
 
-test("the run's slots: SLOTFATHER_COUNT under a lease, else one", async () => {
-  const { runSlots } = await import("../src/verify.mjs");
+test("the run's slots: SLOTFATHER_COUNT under a lease, else one", () => {
   assert.equal(runSlots({ SLOTFATHER_LEASE: "x", SLOTFATHER_COUNT: "2" }), 2);
   // Without a lease (a CI runner), slot-taking steps run one at a time.
   assert.equal(runSlots({ SLOTFATHER_COUNT: "2" }), 1);
   assert.equal(runSlots({}), 1);
+});
+
+test("verify modules stay under 300 lines and only slotfather.mjs touches slotfather or SLOTFATHER_*", () => {
+  const splitFiles = [
+    "src/slotfather.mjs",
+    "src/heavy.mjs",
+    "src/verify.mjs",
+    "src/verify/steps.mjs",
+    "src/verify/budget.mjs",
+    "src/verify/processes.mjs",
+    "src/verify/run.mjs",
+  ];
+  for (const rel of splitFiles) {
+    const lines = fs.readFileSync(path.join(kitRoot, rel), "utf8").split("\n").length;
+    assert.ok(lines <= 300, `${rel} has ${lines} lines (> 300)`);
+  }
+  const checkedModules = [
+    "src/heavy.mjs",
+    "src/verify.mjs",
+    "src/verify/steps.mjs",
+    "src/verify/budget.mjs",
+    "src/verify/processes.mjs",
+    "src/verify/run.mjs",
+    "src/lanefather.mjs",
+    "src/cli.mjs",
+  ];
+  for (const rel of checkedModules) {
+    const text = fs.readFileSync(path.join(kitRoot, rel), "utf8");
+    assert.doesNotMatch(text, /SLOTFATHER_/, `${rel} must not read SLOTFATHER_* directly`);
+  }
 });
