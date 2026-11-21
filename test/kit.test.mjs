@@ -168,12 +168,27 @@ test("repo-kit heavy forwards SIGTERM to its command but not SIGINT, which the c
   try {
     const log = path.join(repository.root, "signals");
     const script = `import { runLeased } from ${JSON.stringify(path.join(kitRoot, "src/heavy.mjs"))};
-process.exitCode = await runLeased(1, ["sh", "-c", ${JSON.stringify(`trap 'echo INT >> ${log}' INT; trap 'echo TERM >> ${log}; exit 143' TERM; echo ready; while :; do sleep 0.1; done`)}], { env: { ...process.env, SLOTFATHER_LEASE: "outer" } });`;
+const done = runLeased(1, ["sh", "-c", ${JSON.stringify(`trap 'echo INT >> ${log}' INT; trap 'echo TERM >> ${log}; exit 143' TERM; echo ready; while :; do sleep 0.1; done`)}], { env: { ...process.env, SLOTFATHER_LEASE: "outer" } });
+process.once("SIGINT", () => setImmediate(() => console.log("sigint-handled")));
+process.exitCode = await done;`;
     const parent = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "inherit"] });
-    await new Promise(resolve => parent.stdout.once("data", resolve));
+    let stdout = "";
+    const waitForOutput = text => new Promise((resolve, reject) => {
+      if (stdout.includes(text)) return resolve();
+      const onData = chunk => {
+        stdout += chunk;
+        if (stdout.includes(text)) {
+          parent.stdout.off("data", onData);
+          resolve();
+        }
+      };
+      parent.stdout.on("data", onData);
+      parent.once("close", () => reject(new Error(`exited before ${text}: ${stdout}`)));
+    });
+    await waitForOutput("ready");
     const exited = new Promise(resolve => parent.on("close", code => resolve(code)));
     parent.kill("SIGINT");
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await waitForOutput("sigint-handled");
     parent.kill("SIGTERM");
     assert.equal(await exited, 143);
     assert.equal(fs.readFileSync(log, "utf8"), "TERM\n");
