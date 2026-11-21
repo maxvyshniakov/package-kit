@@ -72,6 +72,8 @@ export function withDefaults(config) {
     // repo-kit shoot: the Storybook it reads by default, the Storybook app whose
     // story files a failed index names, and the slots it leases.
     shoot: { url: "http://127.0.0.1:6010", storybookDir: "apps/storybook", slots: 1, ...config.shoot },
+    // repo-kit check file-budget / repo-kit file-budget: per-glob line or byte budgets and a shrink-only allowlist.
+    fileBudget: { ...config.fileBudget },
   };
 }
 

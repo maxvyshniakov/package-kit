@@ -16,8 +16,10 @@ const USAGE = `Usage: repo-kit <command>
   checks                           run REPO_KIT_CHECKS' list of {name, run} in order, as browser.yml does
   verified-tree                    in a workflow: link each REPO_KIT_PLANS plan to a passed result of this tree
   test-hygiene [--init|--update]   shrink-only test rules: fixed sleeps, timing assertions, UI assertions (opt-in)
+  file-budget [--staged] [--all] [--init|--update] [--json]
+                                   per-glob file-size budgets (lines or bytes) and a shrink-only allowlist
   hooks <install|sync|check|status>
-  check                            managed hooks, workflow references and packageManager match the kit
+  check [file-budget]              managed hooks, workflow references and packageManager match the kit
   check-changelogs [--release]
   check-changelog-entries <base>..<head>
                                    each commit changing changelog.paths adds an Unreleased line or says "Changelog: none"
@@ -64,6 +66,23 @@ export async function main([command, ...args]) {
       config = { root: execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() };
     }
     return runTestHygiene({ root: config.root, config, args });
+  }
+  if (command === "file-budget" || (command === "check" && args[0] === "file-budget")) {
+    const budgetArgs = command === "check" ? args.slice(1) : args;
+    const [{ findRoot, loadConfig }, { runFileBudget }] = await Promise.all([import("./config.mjs"), import("./file-budget.mjs")]);
+    let root = null;
+    try {
+      root = findRoot();
+    } catch {
+      // No repo-kit.config.mjs: resolve the Git top-level directory.
+    }
+    let config;
+    if (root) config = await loadConfig(root);
+    else {
+      const { execFileSync } = await import("node:child_process");
+      config = { root: execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() };
+    }
+    return runFileBudget({ root: config.root, config, args: budgetArgs });
   }
   if (command === "friction") {
     const { runFriction } = await import("./friction.mjs");
