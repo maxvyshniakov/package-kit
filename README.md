@@ -199,6 +199,7 @@ went through lane landing still needs separate publication reconciliation.
 | Cut versions and changelogs | `repo-kit release` |
 | Verify an exact release revision | `repo-kit release-gate <ref>` |
 | Publish that verified revision | `repo-kit publish` |
+| Pick the newest compatible `@maxvyshniakov/*` set | `repo-kit adopt [--json] [--apply] [--only <names>]` |
 | Capture a catalog story | `repo-kit shoot` |
 | Keep fixed sleeps and timing asserts out of tests, shrink-only | `repo-kit test-hygiene` |
 | Record and rank agent friction with packages | `repo-kit friction log\|report\|export` |

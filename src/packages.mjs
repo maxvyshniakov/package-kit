@@ -9,6 +9,11 @@ import { chooseVersionSource, readManifestText, setManifestVersion } from "./ver
 
 export const DEFAULT_MANIFEST_FILE = "package.json";
 
+/** Archive slug for a package name (`@scope/name` -> `scope-name`). */
+export function archiveSlug(name) {
+  return name ? name.replace("@", "").replace("/", "-") : undefined;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -76,7 +81,7 @@ export function releasedPackages(root, { versionSource } = {}) {
     if (!fs.existsSync(file)) throw new Error(`${path.relative(root, file)} not found; set changelog.versionSource to the file that holds the version`);
     const { manifest, name, version } = readManifestText(manifestFile, fs.readFileSync(file, "utf8"));
     const isWorkspace = relative !== ".";
-    const archiveSlug = isNpm && name ? name.replace("@", "").replace("/", "-") : undefined;
+    const slug = isNpm ? archiveSlug(name) : undefined;
     const pkg = {
       path: relative,
       dir,
@@ -99,11 +104,11 @@ export function releasedPackages(root, { versionSource } = {}) {
         return isNpm && isWorkspace ? setLockfileWorkspaceVersion(lock, relative, next) : lock;
       },
       archiveName(ver = version) {
-        return archiveSlug ? `${archiveSlug}-${ver}.tgz` : undefined;
+        return slug ? `${slug}-${ver}.tgz` : undefined;
       },
       archiveVersionsIn(text) {
-        if (!archiveSlug || !text) return [];
-        const pattern = new RegExp(`${escapeRegExp(archiveSlug)}-(\\d+\\.\\d+\\.\\d+)\\.tgz`, "g");
+        if (!slug || !text) return [];
+        const pattern = new RegExp(`${escapeRegExp(slug)}-(\\d+\\.\\d+\\.\\d+)\\.tgz`, "g");
         return [...text.matchAll(pattern)].map(match => match[1]);
       },
       versionCommit(git) {

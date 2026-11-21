@@ -18,6 +18,8 @@ const USAGE = `Usage: repo-kit <command>
   test-hygiene [--init|--update]   shrink-only test rules: fixed sleeps, timing assertions, UI assertions (opt-in)
   file-budget [--staged] [--all] [--init|--update] [--json]
                                    per-glob file-size budgets (lines or bytes) and a shrink-only allowlist
+  adopt [--json] [--apply] [--only <names>]
+                                   pick the newest compatible set of @maxvyshniakov/* packages for a consumer
   hooks <install|sync|check|status>
   check [file-budget]              managed hooks, workflow references and packageManager match the kit
   check-changelogs [--release]
@@ -83,6 +85,28 @@ export async function main([command, ...args]) {
       config = { root: execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() };
     }
     return runFileBudget({ root: config.root, config, args: budgetArgs });
+  }
+  if (command === "adopt") {
+    const [{ findRoot, loadConfig, withDefaults }, { runAdopt }] = await Promise.all([import("./config.mjs"), import("./adopt.mjs")]);
+    let root = null;
+    try {
+      root = findRoot();
+    } catch {
+      // No repo-kit.config.mjs: resolve the Git top-level directory or cwd.
+    }
+    let config;
+    if (root) config = await loadConfig(root);
+    else {
+      const { execFileSync } = await import("node:child_process");
+      let fallbackRoot = process.cwd();
+      try {
+        fallbackRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+      } catch {
+        // Not a git checkout; use cwd.
+      }
+      config = { root: fallbackRoot, ...withDefaults({}) };
+    }
+    return runAdopt({ root: config.root, config, args });
   }
   if (command === "friction") {
     const { runFriction } = await import("./friction.mjs");

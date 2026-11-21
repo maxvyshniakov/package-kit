@@ -2,6 +2,11 @@
 
 const STRICT_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 const LENIENT_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:[.-]|$)/;
+const COMPARATOR = /^(\^|~|>=|<=|>|<|=)?v?(\d+\.\d+\.\d+)$/;
+
+export function isStableVersion(version) {
+  return typeof version === "string" && STRICT_VERSION.test(version);
+}
 
 /**
  * Parses `x.y.z` into `[major, minor, patch]`. With `{ lenient: true }`,
@@ -32,6 +37,47 @@ export function satisfiesCaret(range, version) {
   const fixedParts = fixed === -1 ? 3 : fixed + 1;
   return compareVersions(version, match[1]) >= 0
     && candidate.slice(0, fixedParts).every((part, index) => part === floor[index]);
+}
+
+function matchesComparator(term, version) {
+  const match = COMPARATOR.exec(term);
+  if (!match) throw new Error(`Unsupported version range comparator: ${term}`);
+  const op = match[1] || "=";
+  const target = match[2];
+  if (op === "^") return satisfiesCaret(`^${target}`, version);
+  if (op === "~") {
+    const [major, minor] = parseVersion(target);
+    return compareVersions(version, target) >= 0
+      && compareVersions(version, `${major}.${minor + 1}.0`) < 0;
+  }
+  const cmp = compareVersions(version, target);
+  if (op === ">=") return cmp >= 0;
+  if (op === "<=") return cmp <= 0;
+  if (op === ">") return cmp > 0;
+  if (op === "<") return cmp < 0;
+  return cmp === 0;
+}
+
+/**
+ * Checks whether a strict `x.y.z` version satisfies an npm range of caret,
+ * tilde, comparison and exact comparators joined by spaces and `||`.
+ */
+export function satisfiesRange(range, version) {
+  if (typeof range !== "string" || !range.trim()) {
+    throw new Error(`Expected a version range, got ${range}`);
+  }
+  parseVersion(version);
+  const alternatives = range.split("||").map(part => part.trim().split(/\s+/).filter(Boolean));
+  if (!alternatives.length || alternatives.some(terms => !terms.length)) {
+    throw new Error(`Unsupported version range: ${range}`);
+  }
+  // Validate every comparator up front so a bad later branch is never masked by an earlier match.
+  for (const terms of alternatives) {
+    for (const term of terms) {
+      if (!COMPARATOR.test(term)) throw new Error(`Unsupported version range: ${range}`);
+    }
+  }
+  return alternatives.some(terms => terms.every(term => matchesComparator(term, version)));
 }
 
 // `level` is patch, minor, major or an explicit x.y.z above the current one.

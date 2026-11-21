@@ -14,6 +14,7 @@
   },
   "exports": {
     ".": "./src/index.mjs",
+    "./adopt": "./src/adopt.mjs",
     "./changelog": "./src/changelog.mjs",
     "./packed-consumer": "./src/packed-consumer.mjs",
     "./perf-budget": "./src/perf-budget.mjs",

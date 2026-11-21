@@ -235,6 +235,7 @@ export default {
 | `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `repo-kit.config.mjs` too. |
 | `verified-tree` | In a workflow: links each `REPO_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
 | `friction <log\|report\|export>` | The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `repo-kit.config.mjs`. |
+| `adopt [--json] [--apply] [--only <names>]` | Inspects `@maxvyshniakov/*` pins (registry pins and `file:.../*.tgz` vendored archives) across the consumer's `package.json` files, queries GitHub Packages metadata, and picks the newest stable compatible set that satisfies every intra-set `peerDependencies` range (respecting `adopt.hold`). Read-only by default: exits `0` when up to date, `10` when a newer compatible set exists, and `1` (warning, changing nothing) on lookup failure. With `--apply`, updates registry pins via `bun add --exact` and vendored archives by downloading `<scope>-<name>-<version>-<sha12>.tgz` into `adopt.vendorDir` (or the existing archive's directory) followed by `bun install`. Configured via `adopt: { vendorDir, packages, hold: { name: "reason" } }`. |
 
 ## Test hygiene
 
