@@ -4,9 +4,7 @@
 // selection and dynamic per-step scope arguments.
 import { execFileSync } from "node:child_process";
 
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import { createMatcher, globToRegExp, normalizePath } from "./glob.mjs";
 
 /**
  * Compiles a repository-relative path glob into a RegExp: `*` and `?` stay
@@ -14,73 +12,10 @@ function escapeRegExp(text) {
  * trailing `/` means everything below a directory.
  */
 export function compileGlob(glob, label = "inputs") {
-  if (typeof glob !== "string" || !glob) {
-    throw new Error(`${label}: expected a non-empty glob string, got ${JSON.stringify(glob)}`);
-  }
-  let source = "";
-  const pattern = glob.replace(/^(?:\.\/|\/)+/, "").replace(/\/$/, "/**");
-  if (!pattern) {
-    throw new Error(`${label}: "${glob}": empty glob pattern`);
-  }
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-    if (char === "*" && pattern[index + 1] === "*") {
-      const atSegmentStart = index === 0 || pattern[index - 1] === "/";
-      if (atSegmentStart && pattern[index + 2] === "/") {
-        source += "(?:.*/)?";
-        index += 2;
-      } else {
-        source += ".*";
-        index += 1;
-      }
-    } else if (char === "*") source += "[^/]*";
-    else if (char === "?") source += "[^/]";
-    else if (char === "[" || char === "]") {
-      throw new Error(`${label}: "${glob}": character classes ([...]) are not supported; use {a,b}`);
-    } else if (char === "{") {
-      const end = pattern.indexOf("}", index);
-      if (end === -1) throw new Error(`${label}: "${glob}": unclosed "{"`);
-      const body = pattern.slice(index + 1, end);
-      if (body.includes("{")) throw new Error(`${label}: "${glob}": nested {} is not supported`);
-      if (body.includes("**")) throw new Error(`${label}: "${glob}": "**" inside {} is not supported; list the globs separately`);
-      if (body.includes("[") || body.includes("]")) {
-        throw new Error(`${label}: "${glob}": character classes ([...]) are not supported; use {a,b}`);
-      }
-      source += `(?:${body.split(",").map(part => escapeRegExp(part).replaceAll("\\*", "[^/]*").replaceAll("\\?", "[^/]")).join("|")})`;
-      index = end;
-    } else source += escapeRegExp(char);
-  }
-  return new RegExp(`^${source}$`);
+  return globToRegExp(glob, label);
 }
 
-function normalizePath(file) {
-  return String(file).replaceAll("\\", "/").replace(/^(?:\.\/|\/)+/, "");
-}
-
-/**
- * Compiles a list of repository-relative globs (with optional `!` exclusions)
- * into `{ match(path), hasIncludes }`. A path matches iff it matches at least
- * one positive glob and no `!` exclusion glob.
- */
-export function createMatcher(globs = [], label = "inputs") {
-  const include = [];
-  const exclude = [];
-  for (const glob of globs ?? []) {
-    if (typeof glob !== "string" || !glob) {
-      throw new Error(`${label}: expected glob strings, got ${JSON.stringify(glob)}`);
-    }
-    if (glob.startsWith("!")) exclude.push(compileGlob(glob.slice(1), label));
-    else include.push(compileGlob(glob, label));
-  }
-  return {
-    hasIncludes: include.length > 0,
-    match(file) {
-      if (!include.length) return false;
-      const normalized = normalizePath(file);
-      return include.some(re => re.test(normalized)) && !exclude.some(re => re.test(normalized));
-    },
-  };
-}
+export { createMatcher };
 
 /** Resolves `base` (default HEAD) to a commit SHA in `root`. */
 export function resolveBase(root, base = "HEAD", { env = process.env } = {}) {

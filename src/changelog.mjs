@@ -20,52 +20,15 @@
 //   - Removed the `size` prop.
 //     No transition period: <why>
 
+import { compareVersions } from "./semver.mjs";
+
+export { compareVersions, nextVersion, parseVersion, satisfiesCaret } from "./semver.mjs";
+
 export const NO_TRANSITION = "No transition period:";
 
 export const SECTION_NAMES = ["Breaking", "Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"];
 
-const VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 const RELEASE_HEADING = /^## (\d+\.\d+\.\d+) - (\d{4}-\d{2}-\d{2})$/;
-
-export function parseVersion(version) {
-  const match = VERSION.exec(version);
-  if (!match) throw new Error(`Not a release version: ${version}`);
-  return match.slice(1).map(Number);
-}
-
-export function compareVersions(a, b) {
-  const [left, right] = [parseVersion(a), parseVersion(b)];
-  for (let index = 0; index < 3; index++) {
-    if (left[index] !== right[index]) return left[index] - right[index];
-  }
-  return 0;
-}
-
-// npm caret semantics: the leftmost non-zero part is fixed, so ^0.26.1 means
-// >=0.26.1 <0.27.0. Peer ranges between workspace packages use only this form.
-export function satisfiesCaret(range, version) {
-  const match = /^\^(\d+\.\d+\.\d+)$/.exec(range);
-  if (!match) throw new Error(`Expected a ^x.y.z range, got ${range}`);
-  const floor = parseVersion(match[1]);
-  const fixed = floor.findIndex(part => part !== 0);
-  const candidate = parseVersion(version);
-  const fixedParts = fixed === -1 ? 3 : fixed + 1;
-  return compareVersions(version, match[1]) >= 0
-    && candidate.slice(0, fixedParts).every((part, index) => part === floor[index]);
-}
-
-// `level` is patch, minor, major or an explicit x.y.z above the current one.
-export function nextVersion(current, level) {
-  if (VERSION.test(level)) {
-    if (compareVersions(level, current) <= 0) throw new Error(`${level} is not above ${current}`);
-    return level;
-  }
-  const [major, minor, patch] = parseVersion(current);
-  if (level === "major") return `${major + 1}.0.0`;
-  if (level === "minor") return `${major}.${minor + 1}.0`;
-  if (level === "patch") return `${major}.${minor}.${patch + 1}`;
-  throw new Error(`Unknown release level: ${level} (use patch, minor, major or x.y.z)`);
-}
 
 /**
  * Splits a changelog into title, intro, the Unreleased body and releases.

@@ -14,7 +14,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { bunTooOld, localBunVersion, resolveToken, TOKEN_HINT } from "./token.mjs";
+import { resolveToken, TOKEN_HINT } from "./token.mjs";
+import { bunTooOld, localBunVersion } from "./toolchain.mjs";
 
 const ZERO = /^0+$/;
 const RELEASE_BRANCHES = ["main"];

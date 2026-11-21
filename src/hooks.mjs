@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BUN_VERSION } from "./token.mjs";
+import { BUN_VERSION } from "./toolchain.mjs";
 
 const kitRoot = fileURLToPath(new URL("..", import.meta.url));
 

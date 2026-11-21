@@ -15,8 +15,10 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { compareVersions, parseChangelog } from "./changelog.mjs";
+import { parseChangelog } from "./changelog.mjs";
+import { globToRegExp as compileGlob, matcher } from "./glob.mjs";
 import { packageManifestPath, readPackageVersion, releasedPackages } from "./packages.mjs";
+import { compareVersions } from "./semver.mjs";
 
 export const TRAILER = "Changelog";
 const HINT = `Add a line under "## Unreleased" in that CHANGELOG.md, or end the commit message with the trailer "${TRAILER}: none (<reason>)".`;
@@ -26,41 +28,8 @@ const HINT = `Add a line under "## Unreleased" in that CHANGELOG.md, or end the 
  * stay within a path segment, `**` spans segments, `{a,b}` is either, and a
  * trailing "/" names everything below a directory.
  */
-export function globToRegExp(glob) {
-  let source = "";
-  const pattern = glob.replace(/^\.\//, "").replace(/\/$/, "/**");
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-    if (char === "*" && pattern[index + 1] === "*") {
-      // "**/" at a segment's start: any directories, none included; else anything.
-      const atSegmentStart = index === 0 || pattern[index - 1] === "/";
-      if (atSegmentStart && pattern[index + 2] === "/") {
-        source += "(?:.*/)?";
-        index += 2;
-      } else {
-        source += ".*";
-        index += 1;
-      }
-    } else if (char === "*") source += "[^/]*";
-    else if (char === "?") source += "[^/]";
-    else if (char === "[" || char === "]") {
-      throw new Error(`changelog.paths: "${glob}": character classes ([...]) are not supported; use {a,b}`);
-    } else if (char === "{") {
-      const end = pattern.indexOf("}", index);
-      if (end === -1) throw new Error(`changelog.paths: "${glob}": unclosed "{"`);
-      const body = pattern.slice(index + 1, end);
-      if (body.includes("{")) throw new Error(`changelog.paths: "${glob}": nested {} is not supported`);
-      if (body.includes("**")) throw new Error(`changelog.paths: "${glob}": "**" inside {} is not supported; list the globs separately`);
-      // Alternatives match literally, or with * and ? within a segment.
-      source += `(?:${body.split(",").map(part => escape(part).replaceAll("\\*", "[^/]*").replaceAll("\\?", "[^/]")).join("|")})`;
-      index = end;
-    } else source += escape(char);
-  }
-  return new RegExp(`^${source}$`);
-}
-
-function escape(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function globToRegExp(glob, label = "changelog.paths") {
+  return compileGlob(glob, label);
 }
 
 /**
@@ -100,13 +69,16 @@ export function compileRules(paths, packages) {
   }
   return [...byPackage].map(([pkg, globs]) => {
     const includes = globs.filter(glob => !glob.startsWith("!"));
+    const include = includes.map(glob => globToRegExp(glob));
+    const exclude = globs.filter(glob => glob.startsWith("!")).map(glob => globToRegExp(glob.slice(1)));
     return {
       pkg,
       changelog: path.posix.join(pkg.path, "CHANGELOG.md"),
       manifest: packageManifestPath(pkg),
       includes,
-      include: includes.map(globToRegExp),
-      exclude: globs.filter(glob => glob.startsWith("!")).map(glob => globToRegExp(glob.slice(1))),
+      include,
+      exclude,
+      matches: matcher(include, exclude),
     };
   });
 }
@@ -126,7 +98,8 @@ export function unmatchedGlobWarnings(rules, tracked) {
 }
 
 export function shippedFiles(files, rule) {
-  return files.filter(file => rule.include.some(re => re.test(file)) && !rule.exclude.some(re => re.test(file)));
+  const match = rule.matches ?? matcher(rule.include, rule.exclude);
+  return files.filter(match);
 }
 
 const entryLines = text => (text === undefined ? [] : parseChangelog(text).unreleased.split("\n"))

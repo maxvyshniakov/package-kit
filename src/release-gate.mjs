@@ -26,7 +26,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { KIT_VERSION } from "./check.mjs";
 import { SOFTWARE_SWITCHES, compositingStatus, defaultBrowsersPath, playwrightChromium, shadowBrowsers, softwareCompositing } from "./chromium.mjs";
 import { CONFIG_FILE, loadConfig } from "./config.mjs";
 import { leaseSelf } from "./heavy.mjs";
@@ -34,7 +33,8 @@ import { cleanEnvironment, verifyCommand } from "./pre-push.mjs";
 // publish.mjs imports this module too; both use each other only at call time.
 import { githubRepository } from "./publish.mjs";
 import { runTlsGate } from "./tls.mjs";
-import { TOKEN_HINT, bunTooOld, localBunVersion, resolveToken } from "./token.mjs";
+import { TOKEN_HINT, resolveToken } from "./token.mjs";
+import { KIT_VERSION, bunTooOld, localBunVersion } from "./toolchain.mjs";
 
 export const GATES = ["local", "ci"];
 const CONTEXT_PREFIX = "Library checks (local";

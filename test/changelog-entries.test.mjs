@@ -55,14 +55,7 @@ function guarded(files = rootPackageFiles({ "repo-kit.config.mjs": configText(),
   return { ...repository, config, commit, check };
 }
 
-test("globs: * stays in a segment, ** spans them, {a,b}, a trailing slash, and ! excludes", () => {
-  assert.equal(globToRegExp("packages/sid-kit/src/**").test("packages/sid-kit/src/a/b.tsx"), true);
-  assert.equal(globToRegExp("packages/sid-kit/src/**").test("packages/sid-kit/srcset.ts"), false);
-  assert.equal(globToRegExp("src/**/*.css").test("src/a.css"), true);
-  assert.equal(globToRegExp("src/**/*.css").test("src/a/b/c.css"), true);
-  assert.equal(globToRegExp("*.py").test("lib/a.py"), false);
-  assert.equal(globToRegExp("{lanefather,hooks}/**").test("hooks/reference-transaction"), true);
-  assert.equal(globToRegExp("./lanefather/").test("lanefather/cli.py"), true);
+test("compileRules and shippedFiles apply includes and ! exclusions", () => {
   const [rule] = compileRules(PATHS, [{ path: ".", name: "x", manifestFile: "package.json" }]);
   assert.deepEqual(shippedFiles(["src/a.mjs", "src/a.test.mjs", "test/b.mjs", "package.json"], rule), ["src/a.mjs", "package.json"]);
 });

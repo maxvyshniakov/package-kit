@@ -6,12 +6,11 @@
 //   - package.json "packageManager", when set, names the Bun the workflows run.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { hookIssues } from "./hooks.mjs";
-import { BUN_VERSION } from "./token.mjs";
+import { BUN_VERSION, KIT_VERSION } from "./toolchain.mjs";
 
-export const KIT_VERSION = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
+export { KIT_VERSION } from "./toolchain.mjs";
 
 const KIT_REFERENCE = /maxvyshniakov\/repo-kit\/([\w./-]+)@([\w.-]+)/g;
 
