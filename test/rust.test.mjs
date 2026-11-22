@@ -197,8 +197,11 @@ process.exit(0);
       return { code, stdout, stderr, calls };
     };
 
-    // 1. Missing Docker -> UNRUN (77).
-    const noDocker = await runCheck({ PATH: "/usr/bin:/bin" });
+    // 1. Missing Docker -> UNRUN (77). Use an empty directory rather than
+    // /usr/bin:/bin because Linux CI runners install docker in /usr/bin.
+    const emptyBin = path.join(repo.root, "empty-bin");
+    fs.mkdirSync(emptyBin);
+    const noDocker = await runCheck({ PATH: emptyBin });
     assert.equal(noDocker.code, UNRUN);
     assert.equal(UNRUN, 77);
     assert.match(noDocker.stdout, /rust-msrv: unrun: Docker is unavailable/);
