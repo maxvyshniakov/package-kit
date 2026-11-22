@@ -252,15 +252,17 @@ process.exit(0);
     assert.ok(script.lastIndexOf("cargo clean") < script.indexOf("cargo test"));
 
     // 6. Target tree eviction keeps only the 2 most recent target trees.
-    const targetsDir = path.join(cacheDir, "targets");
+    const evictCache = path.join(repo.root, "evict-cache");
+    const targetsDir = path.join(evictCache, "targets");
     for (const [idx, name] of ["newest", "older", "oldest"].entries()) {
       const dir = path.join(targetsDir, name);
       fs.mkdirSync(dir, { recursive: true });
       const t = new Date((1_000_000 - idx) * 1000);
       fs.utimesSync(dir, t, t);
     }
-    const currentTree = targetTree(repo.root, cacheDir, "linux/arm64", { crates });
-    evictTargets(cacheDir, currentTree);
+    const currentTree = targetTree(repo.root, evictCache, "linux/arm64", { crates });
+    fs.mkdirSync(currentTree, { recursive: true });
+    evictTargets(evictCache, currentTree);
     assert.deepEqual(
       fs.readdirSync(targetsDir).sort(),
       [path.basename(currentTree), "newest"].sort(),
