@@ -2,7 +2,7 @@
 // a command runs under `slotfather run -n <slots>`; without it, as on CI
 // runners, it runs directly. A command already under a lease (SLOTFATHER_LEASE
 // set by an outer slotfather run) runs without a second one, so nested commands
-// lease once. REPO_KIT_SLOT_WAIT=<seconds> (or the older SID_KIT_SLOT_WAIT)
+// lease once. PACKAGE_KIT_SLOT_WAIT=<seconds> (or the older SID_KIT_SLOT_WAIT)
 // gives up waiting for the lease after that long: slotfather exits 75, so a CI
 // job fails with that reason instead of being cancelled at its time limit while
 // queued.
@@ -50,12 +50,12 @@ export function capacity() {
 export const readCapacity = capacity;
 
 /**
- * The slots `verify` leases: REPO_KIT_VERIFY_SLOTS when set (CI's reusable
+ * The slots `verify` leases: PACKAGE_KIT_VERIFY_SLOTS when set (CI's reusable
  * workflows set it, `all` by default, so a job holds the whole runner),
  * otherwise the repository's configured count.
  */
 export function verifyLeaseSlots(configured, env = process.env) {
-  return env.REPO_KIT_VERIFY_SLOTS || configured;
+  return env.PACKAGE_KIT_VERIFY_SLOTS || configured;
 }
 
 // slotfather's exit status when --wait ran out before a lease was granted.
@@ -63,7 +63,7 @@ export const WAIT_EXPIRED = 75;
 
 /** Seconds to wait for a lease before giving up, or 0: wait as long as it takes. */
 export function slotWait(env = process.env) {
-  const seconds = Number.parseInt(env.REPO_KIT_SLOT_WAIT ?? env.SID_KIT_SLOT_WAIT ?? "", 10);
+  const seconds = Number.parseInt(env.PACKAGE_KIT_SLOT_WAIT ?? env.SID_KIT_SLOT_WAIT ?? "", 10);
   return seconds > 0 ? seconds : 0;
 }
 
@@ -93,11 +93,11 @@ export function commandPurpose(command, env = process.env) {
 
 /**
  * The lease's label: who and what, never a bare directory name. A label from
- * REPO_KIT_SLOT_LABEL (a lane's, say) gets the purpose appended unless it has
+ * PACKAGE_KIT_SLOT_LABEL (a lane's, say) gets the purpose appended unless it has
  * one already (a space).
  */
 export function slotLabel(purpose, { env = process.env, cwd = process.cwd() } = {}) {
-  const given = env.REPO_KIT_SLOT_LABEL;
+  const given = env.PACKAGE_KIT_SLOT_LABEL;
   if (given) return given.includes(" ") || !purpose ? given : `${given} ${purpose}`;
   return `${projectName(cwd)} ${purpose}`;
 }
@@ -107,14 +107,14 @@ export function leasedCommand(slots, command, { env = process.env, cwd = process
   if (env.SLOTFATHER_LEASE || !slotfather) return command;
   const wait = slotWait(env);
   const context = [];
-  if (env.REPO_KIT_SLOT_PRIORITY) {
-    if (!["interactive", "normal", "batch"].includes(env.REPO_KIT_SLOT_PRIORITY)) throw new Error("invalid execution priority");
-    context.push("--priority", env.REPO_KIT_SLOT_PRIORITY);
+  if (env.PACKAGE_KIT_SLOT_PRIORITY) {
+    if (!["interactive", "normal", "batch"].includes(env.PACKAGE_KIT_SLOT_PRIORITY)) throw new Error("invalid execution priority");
+    context.push("--priority", env.PACKAGE_KIT_SLOT_PRIORITY);
   }
-  if (env.REPO_KIT_SLOT_TICKET) context.push("--ticket", env.REPO_KIT_SLOT_TICKET);
-  if (env.REPO_KIT_SLOT_META) {
+  if (env.PACKAGE_KIT_SLOT_TICKET) context.push("--ticket", env.PACKAGE_KIT_SLOT_TICKET);
+  if (env.PACKAGE_KIT_SLOT_META) {
     let metadata;
-    try { metadata = JSON.parse(env.REPO_KIT_SLOT_META); }
+    try { metadata = JSON.parse(env.PACKAGE_KIT_SLOT_META); }
     catch { throw new Error("invalid execution metadata JSON"); }
     if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") throw new Error("execution metadata must be an object");
     for (const [key, value] of Object.entries(metadata)) {
@@ -122,8 +122,8 @@ export function leasedCommand(slots, command, { env = process.env, cwd = process
       context.push("--meta", `${key}=${value}`);
     }
   }
-  if (env.REPO_KIT_SLOT_YIELDABLE === "1") context.push("--yieldable");
-  const label = env.REPO_KIT_SLOT_LABEL && !purpose ? env.REPO_KIT_SLOT_LABEL : slotLabel(purpose ?? commandPurpose(command, env), { env, cwd });
+  if (env.PACKAGE_KIT_SLOT_YIELDABLE === "1") context.push("--yieldable");
+  const label = env.PACKAGE_KIT_SLOT_LABEL && !purpose ? env.PACKAGE_KIT_SLOT_LABEL : slotLabel(purpose ?? commandPurpose(command, env), { env, cwd });
   return ["slotfather", "run", "-n", String(slots), "--label", label,
     ...context, ...(wait ? ["--wait", String(wait)] : []), "--", ...command];
 }
@@ -165,7 +165,7 @@ export function runLeased(slots, command, { env = process.env, cwd = process.cwd
     child.on("close", (code, signal) => {
       release();
       if (leased && code === WAIT_EXPIRED && slotWait(env)) {
-        console.error(`repo-kit: gave up waiting for ${slots} slot(s) after ${slotWait(env)}s (slotfather status shows the queue)`);
+        console.error(`package-kit: gave up waiting for ${slots} slot(s) after ${slotWait(env)}s (slotfather status shows the queue)`);
       }
       resolve(code ?? 128 + os.constants.signals[signal]);
     });
@@ -177,7 +177,7 @@ export function runLeased(slots, command, { env = process.env, cwd = process.cwd
  * no slotfather; resolves to whether it did (process.exitCode then holds the
  * leased run's code).
  */
-export async function leaseSelf(slots, { env = process.env, input, purpose = process.argv.slice(2, 4).map(arg => arg.replace(/^-+/, "")).join(" ") || "repo-kit" } = {}) {
+export async function leaseSelf(slots, { env = process.env, input, purpose = process.argv.slice(2, 4).map(arg => arg.replace(/^-+/, "")).join(" ") || "package-kit" } = {}) {
   if (env.SLOTFATHER_LEASE || !hasSlotfather(env)) return false;
   process.exitCode = await runLeased(slots, [process.execPath, ...process.argv.slice(1)], { env, input, purpose });
   return true;

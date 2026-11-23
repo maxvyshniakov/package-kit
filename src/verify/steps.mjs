@@ -14,7 +14,7 @@ export { WORKER_MEMORY_GIB, unitTestWorkers };
  * besides them), workers? (a fixed worker count), timeout? (minutes it may run;
  * `stepTimeout` when left out, 0 for no limit), slots? (the run's slots it
  * holds while it runs: steps that take slots run side by side only as far as
- * the run's lease goes; it sees its share as REPO_KIT_STEP_SLOTS) }. `needs`
+ * the run's lease goes; it sees its share as PACKAGE_KIT_STEP_SLOTS) }. `needs`
  * defaults to [].
  */
 export function normalizeSteps(steps, { stepTimeout = 0 } = {}) {
@@ -149,7 +149,7 @@ export function chain(entries) {
 
 export function verifySteps(config, { release = false, browser = false } = {}) {
   const declared = browser ? config.verify.browser : config.verify.steps;
-  if (!declared) throw new Error(`repo-kit.config.mjs declares no verify.${browser ? "browser" : "steps"}`);
+  if (!declared) throw new Error(`package-kit.config.mjs declares no verify.${browser ? "browser" : "steps"}`);
   return normalizeSteps(typeof declared === "function" ? declared({ release }) : declared, { stepTimeout: config.verify.stepTimeout });
 }
 

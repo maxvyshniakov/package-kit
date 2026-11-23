@@ -6,9 +6,9 @@ import path from "node:path";
 const GiB = 1024 ** 3;
 const PS_ARGS = ["-A", "-o", "pid=,ppid=,pgid=,rss="];
 
-// Each step's environment carries REPO_KIT_STEP=<this run>.<step index>, so a
+// Each step's environment carries PACKAGE_KIT_STEP=<this run>.<step index>, so a
 // process it starts that leaves its tree can still be told apart.
-export const STEP_MARK = "REPO_KIT_STEP";
+export const STEP_MARK = "PACKAGE_KIT_STEP";
 
 /**
  * Each step's processes in one process table ({ pid, ppid, pgid, rss } rows,
@@ -20,7 +20,7 @@ export const STEP_MARK = "REPO_KIT_STEP";
  * carries what earlier samples found. A child of init that no step holds and
  * `checked` has not seen is offered once to `marked` (pids -> Map of pid to
  * step name): a daemon such as agent-browser's, orphaned before any sample saw
- * it, joins the step whose REPO_KIT_STEP its environment carries. Returns
+ * it, joins the step whose PACKAGE_KIT_STEP its environment carries. Returns
  * name -> { pids, gib }.
  */
 export function stepProcesses(table, roots, members = new Map(), { marked = () => new Map(), checked = new Set() } = {}) {
@@ -61,7 +61,7 @@ export function stepProcesses(table, roots, members = new Map(), { marked = () =
 }
 
 /**
- * Those of `pids` whose environment carries one of `marks` (REPO_KIT_STEP
+ * Those of `pids` whose environment carries one of `marks` (PACKAGE_KIT_STEP
  * value -> step name), as pid -> name. Linux reads /proc/<pid>/environ, macOS
  * `ps -E`; either shows only the user's own processes (macOS: not platform
  * binaries), and the rest read as unmarked.

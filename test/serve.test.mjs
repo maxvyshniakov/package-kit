@@ -233,10 +233,10 @@ test("startStaticServer handles a 50-request concurrent burst without dropping c
   }
 });
 
-test("bin/repo-kit.mjs serve logs bound URL and shuts down cleanly on SIGTERM and SIGINT", async () => {
+test("bin/package-kit.mjs serve logs bound URL and shuts down cleanly on SIGTERM and SIGINT", async () => {
   const repo = tempRepository({ "site/index.html": "<h1>ok</h1>" });
   const siteDir = path.join(repo.root, "site");
-  const binPath = path.join(kitRoot, "bin/repo-kit.mjs");
+  const binPath = path.join(kitRoot, "bin/package-kit.mjs");
 
   try {
     for (const signal of ["SIGTERM", "SIGINT"]) {
@@ -270,10 +270,10 @@ test("bin/repo-kit.mjs serve logs bound URL and shuts down cleanly on SIGTERM an
   }
 });
 
-test("package.json exports ./serve and packed-consumer includes @maxvyshniakov/repo-kit/serve", () => {
+test("package.json exports ./serve and packed-consumer includes @maxvyshniakov/package-kit/serve", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(kitRoot, "package.json"), "utf8"));
   assert.equal(manifest.exports["./serve"], "./src/serve.mjs");
-  assert.ok(entrySpecifiers(manifest).includes("@maxvyshniakov/repo-kit/serve"));
+  assert.ok(entrySpecifiers(manifest).includes("@maxvyshniakov/package-kit/serve"));
   const files = new Set(
     Object.values(manifest.exports)
       .filter(v => typeof v === "string")

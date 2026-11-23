@@ -16,6 +16,6 @@ if (!fs.existsSync(upstream)) {
   console.log(`check:upstream: hooks/reference-transaction matches ${upstream}`);
 } else {
   console.error(`check:upstream: hooks/reference-transaction differs from ${upstream}.`);
-  console.error("Copy it, update REFERENCE_TRANSACTION_SHA256 in src/hooks.mjs and release repo-kit.");
+  console.error("Copy it, update REFERENCE_TRANSACTION_SHA256 in src/hooks.mjs and release package-kit.");
   process.exitCode = 1;
 }

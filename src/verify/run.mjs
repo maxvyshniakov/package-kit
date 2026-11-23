@@ -42,8 +42,8 @@ export function signalStep(pid, processes, signal) {
 
 export function startProcess(step, { root, running, mark, processes = () => [], onLine = () => {}, environment = process.env }) {
   const env = { ...withoutYield(environment), [STEP_MARK]: mark };
-  if (step.workers) env.VITEST_MAX_WORKERS = env.REPO_KIT_WORKERS = String(step.workers);
-  if (step.slots) env.REPO_KIT_STEP_SLOTS = String(Math.min(step.slots, runSlots(environment)));
+  if (step.workers) env.VITEST_MAX_WORKERS = env.PACKAGE_KIT_WORKERS = String(step.workers);
+  if (step.slots) env.PACKAGE_KIT_STEP_SLOTS = String(Math.min(step.slots, runSlots(environment)));
   // Each step gets its own process group, so stopping it reaches its workers too.
   const child = spawn("bun", step.command, { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   // Output streams live, each line prefixed with its step, so a step that hangs is visible.

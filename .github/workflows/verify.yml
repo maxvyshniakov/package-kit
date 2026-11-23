@@ -4,11 +4,11 @@
 # entries. verify leases `slots` (default all: the whole runner) through
 # slotfather, so it never runs beside another repository's heavy job and its
 # memory budget is the runner's. Callers keep their workflow at
-# .github/workflows/check.yml, which `repo-kit publish` waits for:
+# .github/workflows/check.yml, which `package-kit publish` waits for:
 #
 #   jobs:
 #     check:
-#       uses: maxvyshniakov/repo-kit/.github/workflows/verify.yml@v0.10.0
+#       uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v0.10.0
 #
 # The caller grants contents: read and packages: read.
 name: verify
@@ -47,7 +47,7 @@ on:
         type: string
         default: ""
       fetch-depth:
-        description: actions/checkout's fetch-depth. 0 fetches every branch's history, which a verify step running `repo-kit check-changelog-entries origin/main..HEAD` needs.
+        description: actions/checkout's fetch-depth. 0 fetches every branch's history, which a verify step running `package-kit check-changelog-entries origin/main..HEAD` needs.
         type: number
         default: 1
 jobs:
@@ -63,8 +63,8 @@ jobs:
       # bunfig.toml reads @maxvyshniakov packages from GitHub Packages with this
       # token, here and in the packed-consumer check's install.
       GITHUB_TOKEN: ${{ github.token }}
-      REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
-      REPO_KIT_VERIFY_SLOTS: ${{ inputs.slots }}
+      PACKAGE_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
+      PACKAGE_KIT_VERIFY_SLOTS: ${{ inputs.slots }}
     steps:
       - name: Refuse a self-hosted runner in a public repository
         if: ${{ github.event.repository.visibility == 'public' && contains(inputs.runner, 'self-hosted') }}
@@ -81,7 +81,7 @@ jobs:
         with:
           fetch-depth: ${{ inputs.fetch-depth }}
       - if: inputs.verified-url == ''
-        uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.10.0
+        uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0
       - if: inputs.verified-url == ''
         run: bun run verify -- $RELEASE_ARGS $VERIFY_ARGS
         env:

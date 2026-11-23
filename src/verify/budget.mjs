@@ -1,4 +1,4 @@
-// Machine core, memory and worker budgets for `repo-kit verify`.
+// Machine core, memory and worker budgets for `package-kit verify`.
 import os from "node:os";
 
 import { capacity as readCapacity, leasedSlots, runSlots } from "../slotfather.mjs";
@@ -15,13 +15,13 @@ export const USES_CORES_BASE_GIB = 0.25;
 export { leasedSlots, readCapacity, readCapacity as capacity, runSlots };
 
 /**
- * The cores this run may use: REPO_KIT_VERIFY_CORES (or the older
+ * The cores this run may use: PACKAGE_KIT_VERIFY_CORES (or the older
  * SID_KIT_VERIFY_CORES) when set; under a slotfather lease its share of the
  * machine (the leased slots of slotfather's total slots); otherwise, as on CI
  * without slotfather, every core.
  */
 export function verifyCores(env = process.env, { cpus = os.availableParallelism(), capacity = readCapacity } = {}) {
-  const override = Number.parseInt(env.REPO_KIT_VERIFY_CORES ?? env.SID_KIT_VERIFY_CORES ?? "", 10);
+  const override = Number.parseInt(env.PACKAGE_KIT_VERIFY_CORES ?? env.SID_KIT_VERIFY_CORES ?? "", 10);
   if (override > 0) return override;
   const leased = leasedSlots(env);
   if (leased) {
@@ -32,7 +32,7 @@ export function verifyCores(env = process.env, { cpus = os.availableParallelism(
 }
 
 /**
- * The memory this run may use, in GiB: REPO_KIT_VERIFY_MEMORY_GIB when set.
+ * The memory this run may use, in GiB: PACKAGE_KIT_VERIFY_MEMORY_GIB when set.
  * Under a slotfather lease, the leased slots times the memory slotfather gives
  * a slot (for example 5 GiB), or no figure where slotfather budgets
  * cores only (as on a workstation); without a lease, what Linux reports available, or all
@@ -44,7 +44,7 @@ export function verifyMemory(env = process.env, {
   platform = process.platform, free = os.freemem(), total = os.totalmem(),
   constrained = process.constrainedMemory?.(), capacity = readCapacity,
 } = {}) {
-  const override = Number.parseFloat(env.REPO_KIT_VERIFY_MEMORY_GIB ?? "");
+  const override = Number.parseFloat(env.PACKAGE_KIT_VERIFY_MEMORY_GIB ?? "");
   if (override > 0) return override;
   const limits = [];
   if (constrained > 0 && constrained < total) limits.push(constrained / GiB);

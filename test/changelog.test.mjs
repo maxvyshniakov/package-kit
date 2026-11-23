@@ -43,7 +43,7 @@ const quiet = fn => {
   return result;
 };
 
-test("repo-kit's own changelog matches its package.json", () => {
+test("package-kit's own changelog matches its package.json", () => {
   for (const pkg of changelogPackages(kitRoot)) assert.deepEqual(changelogIssues(pkg), [], pkg.name);
 });
 

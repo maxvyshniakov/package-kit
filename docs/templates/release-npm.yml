@@ -1,7 +1,7 @@
 # A library's .github/workflows/release-npm.yml: publishes the released version
 # to npmjs.org with npm trusted publishing (OIDC) and, from a public
-# repository, provenance. Copy it under this name; repo-kit publish's refusal
-# outside Actions names it. The package's repo-kit.config.mjs sets
+# repository, provenance. Copy it under this name; package-kit publish's refusal
+# outside Actions names it. The package's package-kit.config.mjs sets
 # `publish: { registry: "npm" }` (or ["github", "npm"] while consumers still
 # install it from GitHub Packages).
 #
@@ -9,7 +9,7 @@
 #   npm trust github <package> --file release-npm.yml --repo <owner>/<repo>
 #   The OIDC claims name this caller's workflow file, so the job stays here
 #   and does not move into a reusable workflow.
-# - Inside Actions, `repo-kit publish` skips the release gate's own wait: the
+# - Inside Actions, `package-kit publish` skips the release gate's own wait: the
 #   check job below gates the publication.
 # - Only the publishing job gets id-token: write and contents: write (the tag);
 #   release.yml's permissions stay as they were, so its callers are unchanged.
@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    uses: maxvyshniakov/repo-kit/.github/workflows/verify.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v0.10.0
     permissions:
       contents: read
       packages: read
@@ -43,5 +43,5 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.10.0
-      - uses: maxvyshniakov/repo-kit/actions/npm-publish@v0.10.0
+      - uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0
+      - uses: maxvyshniakov/package-kit/actions/npm-publish@v0.10.0

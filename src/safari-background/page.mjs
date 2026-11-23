@@ -1,4 +1,4 @@
-// repo-kit Safari screenshots's line into the page: a local reverse proxy in front of the Storybook preview that injects
+// package-kit Safari screenshots's line into the page: a local reverse proxy in front of the Storybook preview that injects
 // beacon.js into every HTML page, runs scripts in the page through it.
 // Safari Technology Preview is launched without WebDriver (a driven window activates itself on real input), so
 // this replaces page.evaluate. A per-run token keeps tabs from earlier runs out of the samples.

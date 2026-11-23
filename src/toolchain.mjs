@@ -1,4 +1,4 @@
-// Shared toolchain facts: repo-kit's own version and the Bun floor.
+// Shared toolchain facts: package-kit's own version and the Bun floor.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -7,7 +7,7 @@ import { compareVersions } from "./semver.mjs";
 
 export const KIT_VERSION = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
 
-// The oldest Bun repo-kit supports; the workflows pin the same version.
+// The oldest Bun package-kit supports; the workflows pin the same version.
 export const BUN_VERSION = "1.4.4";
 
 export function compareBunVersions(a, b) {
@@ -18,7 +18,7 @@ export function compareBunVersions(a, b) {
 export function bunTooOld(version) {
   if (!version) return "bun is not on PATH";
   return compareBunVersions(version, BUN_VERSION) < 0
-    ? `bun ${version} predates ${BUN_VERSION}, the oldest Bun repo-kit supports; upgrade Bun`
+    ? `bun ${version} predates ${BUN_VERSION}, the oldest Bun package-kit supports; upgrade Bun`
     : undefined;
 }
 

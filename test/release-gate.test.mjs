@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { withDefaults } from "../src/config.mjs";
 import {
+  gateRecord,
   attestationRefusal,
   attestationState,
   ciGateDecision,
@@ -89,17 +90,17 @@ test("without a passed attestation publish refuses and names the command that re
   const sha = "a".repeat(40);
   const missing = attestationRefusal({ state: "missing" }, sha).join("\n");
   assert.match(missing, /no local release gate attestation \(Library checks \(local, …\)\) on aaaaaaa/);
-  assert.match(missing, /bunx repo-kit release-gate aaaaaaaaaaaa/);
+  assert.match(missing, /bunx package-kit release-gate aaaaaaaaaaaa/);
   assert.match(missing, /release: \{ gate: "ci" \}/, "names the switch back");
   const failed = attestationRefusal({ state: "failed", status: { description: "Failed on mac", state: "failure" } }, sha).join("\n");
   assert.match(failed, /the local release gate failed on aaaaaaa: Failed on mac/);
 });
 
 test("a status description fits GitHub's 140 characters and points at the local log", () => {
-  const description = statusDescription({ passed: true, host: "a-very-long-host-name-that-goes-on-and-on-and-on", platform: "darwin", kitVersion: "0.2.4", seconds: 3725, log: ".git/repo-kit-gate/0123456789ab.log", browser: 72 });
+  const description = statusDescription({ passed: true, host: "a-very-long-host-name-that-goes-on-and-on-and-on", platform: "darwin", kitVersion: "0.2.4", seconds: 3725, log: ".git/package-kit-gate/0123456789ab.log", browser: 72 });
   assert.ok(description.length <= 140, `${description.length}: ${description}`);
   assert.match(description, /^Passed on /);
-  assert.match(description, /log \.git\/repo-kit-gate\/0123456789ab\.log/);
+  assert.match(description, /log \.git\/package-kit-gate\/0123456789ab\.log/);
   assert.match(statusDescription({ passed: true, host: "m", platform: "darwin", kitVersion: "0.2.4", seconds: 65, log: "l", browser: 72 }), /1m 5s.*72 software-GPU Chromium launches/);
   assert.match(statusDescription({ passed: false, host: "m", platform: "darwin", kitVersion: "0.2.4", seconds: 5, log: "l" }), /^Failed on m \(macOS\)/);
 });
@@ -115,13 +116,13 @@ test("the deploy follows release.gate: advisory checks under local, every check 
   assert.deepEqual(ciGateDecision({ gate: "ci", needs: { check: { result: "skipped" } } }), { run: false, failed: ["check"] });
 });
 
-test("repo-kit ci-gate writes run=true|false for the deploy's later steps", () => {
-  const repository = tempRepository({ "repo-kit.config.mjs": 'export default { release: { gate: "ci" } };\n' });
+test("package-kit ci-gate writes run=true|false for the deploy's later steps", () => {
+  const repository = tempRepository({ "package-kit.config.mjs": 'export default { release: { gate: "ci" } };\n' });
   try {
     const outputFile = path.join(repository.root, "github-output");
     const run = needs => {
       fs.writeFileSync(outputFile, "");
-      const result = spawnSync(process.execPath, [path.join(kitRoot, "src/cli.mjs"), "ci-gate"], { cwd: repository.root, encoding: "utf8", env: { ...process.env, REPO_KIT_NEEDS: JSON.stringify(needs), GITHUB_OUTPUT: outputFile } });
+      const result = spawnSync(process.execPath, [path.join(kitRoot, "src/cli.mjs"), "ci-gate"], { cwd: repository.root, encoding: "utf8", env: { ...process.env, PACKAGE_KIT_NEEDS: JSON.stringify(needs), GITHUB_OUTPUT: outputFile } });
       return { ...result, output: fs.readFileSync(outputFile, "utf8") };
     };
     const failed = run({ check: { result: "failure" } });
@@ -129,7 +130,7 @@ test("repo-kit ci-gate writes run=true|false for the deploy's later steps", () =
     assert.equal(failed.output, "run=false\n");
     assert.match(failed.stdout, /release\.gate is "ci" and check did not pass/);
     assert.equal(run({ check: { result: "success" } }).output, "run=true\n");
-    fs.writeFileSync(path.join(repository.root, "repo-kit.config.mjs"), "export default {};\n");
+    fs.writeFileSync(path.join(repository.root, "package-kit.config.mjs"), "export default {};\n");
     const advisory = run({ check: { result: "failure" } });
     assert.equal(advisory.output, "run=true\n");
     assert.match(advisory.stdout, /advisory/);
@@ -142,19 +143,19 @@ test("repo-kit ci-gate writes run=true|false for the deploy's later steps", () =
 
 // A repository whose `bun` logs what the gate runs, and a fake GitHub API.
 function gateFixture({ verifyExit = "0", browser = false, historical = false } = {}) {
-  // historical: a commit from before the repository took its gate from repo-kit
-  // (Sid-Kit's 0.41.1): no repo-kit.config.mjs, its own verify scripts.
+  // historical: a commit from before the repository took its gate from package-kit
+  // (Sid-Kit's 0.41.1): no package-kit.config.mjs, its own verify scripts.
   const repository = tempRepository(historical ? {
     "package.json": { name: "@maxvyshniakov/example", version: "0.2.0", scripts: { verify: "node scripts/verify.mjs", "verify:browser": "node scripts/verify.mjs --browser" } },
   } : {
-    "package.json": { name: "@maxvyshniakov/example", version: "0.2.0", scripts: { verify: "repo-kit verify" } },
-    "repo-kit.config.mjs": browser
+    "package.json": { name: "@maxvyshniakov/example", version: "0.2.0", scripts: { verify: "package-kit verify" } },
+    "package-kit.config.mjs": browser
       ? 'export default { verify: { steps: () => [], browser: () => [] } };\n'
       : "export default { verify: { steps: () => [] } };\n",
   }, { git: true });
   const { root } = repository;
   repository.git("remote", "add", "origin", "https://github.com/maxvyshniakov/example.git");
-  const bin = fs.mkdtempSync(path.join(path.dirname(root), "repo-kit-gate-bin-"));
+  const bin = fs.mkdtempSync(path.join(path.dirname(root), "package-kit-gate-bin-"));
   const log = path.join(bin, "bun.log");
   const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
   fs.writeFileSync(path.join(bin, "bun"), `#!/bin/sh
@@ -189,7 +190,7 @@ esac
     fs.rmSync(log, { force: true });
     return lines;
   };
-  const config = async () => withDefaults(historical ? {} : (await import(`${path.join(root, "repo-kit.config.mjs")}?${Date.now()}`)).default);
+  const config = async () => withDefaults(historical ? {} : (await import(`${path.join(root, "package-kit.config.mjs")}?${Date.now()}`)).default);
   const gate = async (args = [], extra) => {
     const streams = capture();
     const result = await runReleaseGate({ root, ...(await config()) }, args, { ...deps(extra), ...streams });
@@ -216,9 +217,9 @@ test("the gate verifies the exact commit in a clean worktree and records a passe
     assert.equal(posts[0].body.state, "success");
     assert.equal(posts[0].body.context, "Library checks (local, darwin-arm64)");
     assert.deepEqual(posts[1].body, { ...posts[0].body, context: "Library checks (local, macOS)" });
-    assert.match(posts[0].body.description, new RegExp(`^Passed on test-mac \\(macOS\\).*log \\.git/repo-kit-gate/${fixture.sha.slice(0, 12)}\\.log`));
+    assert.match(posts[0].body.description, new RegExp(`^Passed on test-mac \\(macOS\\).*log \\.git/package-kit-gate/${fixture.sha.slice(0, 12)}\\.log`));
     // The log holds what ran.
-    const log = fs.readFileSync(path.join(fixture.root, ".git/repo-kit-gate", `${fixture.sha.slice(0, 12)}.log`), "utf8");
+    const log = fs.readFileSync(path.join(fixture.root, ".git/package-kit-gate", `${fixture.sha.slice(0, 12)}.log`), "utf8");
     assert.match(log, /verify output verify -- --release/);
     assert.match(log, /release-gate: slotfather lease none/);
     assert.match(output, /no Playwright in this commit/);
@@ -332,5 +333,18 @@ test("a commit from before the kit runs its own verify and verify:browser script
     assert.deepEqual(fixture.ran().filter(line => line.startsWith("run ")), ["run verify -- --release /mirror", "run verify:browser /mirror"]);
   } finally {
     fixture.cleanup();
+  }
+});
+
+test("a commit the gate passed before the rename to package-kit still counts as passed", () => {
+  const repository = tempRepository({ "repo-kit-gate/passed": "aaaa 12\n", "package-kit-gate/passed": "bbbb 30\n" });
+  try {
+    const record = gateRecord(path.join(repository.root, "package-kit-gate"));
+    assert.deepEqual([...record.read()], [["aaaa", 12], ["bbbb", 30]]);
+    record.add("cccc", 5);
+    assert.equal(fs.readFileSync(path.join(repository.root, "package-kit-gate/passed"), "utf8"), "bbbb 30\ncccc 5\n");
+    assert.equal(fs.readFileSync(path.join(repository.root, "repo-kit-gate/passed"), "utf8"), "aaaa 12\n");
+  } finally {
+    repository.cleanup();
   }
 });

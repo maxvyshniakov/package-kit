@@ -40,10 +40,10 @@ runs:
       shell: bash
       run: node "$GITHUB_ACTION_PATH/../../src/verified-tree.mjs"
       env:
-        REPO_KIT_PLANS: ${{ inputs.plans }}
-        REPO_KIT_BRANCHES: ${{ inputs.branches }}
-        REPO_KIT_DEPTH: ${{ inputs.depth }}
-        REPO_KIT_FORCE: ${{ inputs.force }}
-        REPO_KIT_PLATFORM: ${{ inputs.platform }}
-        REPO_KIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PACKAGE_KIT_PLANS: ${{ inputs.plans }}
+        PACKAGE_KIT_BRANCHES: ${{ inputs.branches }}
+        PACKAGE_KIT_DEPTH: ${{ inputs.depth }}
+        PACKAGE_KIT_FORCE: ${{ inputs.force }}
+        PACKAGE_KIT_PLATFORM: ${{ inputs.platform }}
+        PACKAGE_KIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GITHUB_TOKEN: ${{ inputs.token }}

@@ -59,7 +59,7 @@ test("the consumer installs every peer but the optional ones", () => {
   ]), ["react", "react-dom"]);
 });
 
-test("an optional peer the repository pins is installed too; one it does not pin is left out (repo-kit#3)", () => {
+test("an optional peer the repository pins is installed too; one it does not pin is left out (package-kit#3)", () => {
   const manifests = [{ peerDependencies: { react: "^19.0.0", "@floating-ui/dom": "^1.6.0", playwright: ">=1.52.0" },
     peerDependenciesMeta: { "@floating-ui/dom": { optional: true }, playwright: { optional: true } } }];
   const pinned = pinnedVersions([{ devDependencies: { react: "19.1.0", "@floating-ui/dom": "1.6.13" } }]);

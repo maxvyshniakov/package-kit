@@ -36,17 +36,19 @@ test("commits recorded by the earlier copies of the hook count as verified", () 
   const repository = tempRepository({
     "sid-kit-verified": `${sha("a")} release\n`,
     "verified-commits": `${sha("b")}\n`,
-    "repo-kit-verified": `${sha("c")}\n`,
+    "package-kit-verified": `${sha("c")}\n`,
+    // Before the rename to package-kit.
+    "repo-kit-verified": `${sha("d")} release\n`,
   });
   try {
-    assert.deepEqual([...readVerified(repository.root)].sort(), [`${sha("a")} release`, sha("b"), sha("c")]);
+    assert.deepEqual([...readVerified(repository.root)].sort(), [`${sha("a")} release`, sha("b"), sha("c"), `${sha("d")} release`]);
   } finally {
     repository.cleanup();
   }
 });
 
 test("a commit verifies with its own verify script, an older scripts/verify.mjs, or not at all", () => {
-  const modern = tempRepository({ "package.json": { scripts: { verify: "repo-kit verify" } } });
+  const modern = tempRepository({ "package.json": { scripts: { verify: "package-kit verify" } } });
   const older = tempRepository({ "package.json": { scripts: {} }, "scripts/verify.mjs": "" });
   const none = tempRepository({ "package.json": {} });
   try {
@@ -59,19 +61,19 @@ test("a commit verifies with its own verify script, an older scripts/verify.mjs,
   }
 });
 
-// A repository with repo-kit linked into node_modules and its synced hooks; the
+// A repository with package-kit linked into node_modules and its synced hooks; the
 // tracked hook runs against fake bun, gh and slotfather that log what they see.
 function pushFixture({ slotfather = true, lease = "", exit = "0", release = false, token, ghToken, bunVersion = "1.4.4", historical = false, releaseBranches } = {}) {
   const repository = tempRepository({
     "package.json": historical
       ? { name: "@maxvyshniakov/example", version: "0.1.0", scripts: {} }
-      : { name: "@maxvyshniakov/example", version: "0.1.0", scripts: { verify: "repo-kit verify" } },
+      : { name: "@maxvyshniakov/example", version: "0.1.0", scripts: { verify: "package-kit verify" } },
     ...(historical ? { "scripts/verify.mjs": "" } : {}),
     // As the README's config does; a linked worktree must resolve it too.
-    "repo-kit.config.mjs": 'import { chain } from "@maxvyshniakov/repo-kit";\nexport default { prePush: { slots: 3 }, verify: { steps: chain([]) } };\n',
+    "package-kit.config.mjs": 'import { chain } from "@maxvyshniakov/package-kit";\nexport default { prePush: { slots: 3 }, verify: { steps: chain([]) } };\n',
   });
   if (releaseBranches !== undefined) {
-    const config = path.join(repository.root, "repo-kit.config.mjs");
+    const config = path.join(repository.root, "package-kit.config.mjs");
     fs.writeFileSync(config, fs.readFileSync(config, "utf8").replace("slots: 3", `slots: 3, releaseBranches: ${JSON.stringify(releaseBranches)}`));
   }
   const { root } = repository;
@@ -79,7 +81,7 @@ function pushFixture({ slotfather = true, lease = "", exit = "0", release = fals
   const bin = path.join(root, ".bin");
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(root, "node_modules/@maxvyshniakov"), { recursive: true });
-  fs.symlinkSync(kitRoot, path.join(root, "node_modules/@maxvyshniakov/repo-kit"));
+  fs.symlinkSync(kitRoot, path.join(root, "node_modules/@maxvyshniakov/package-kit"));
   fs.writeFileSync(path.join(root, ".gitignore"), "node_modules\n.bin\n.probe.log\n");
   const { log: print } = console;
   console.log = () => {};
@@ -228,19 +230,19 @@ test("a Bun older than 1.4.4 refuses the push before any install", () => {
   }
 });
 
-test("a checkout without repo-kit installed refuses the push", () => {
+test("a checkout without package-kit installed refuses the push", () => {
   const fixture = pushFixture({ token: "t" });
   try {
     fs.rmSync(path.join(fixture.root, "node_modules"), { recursive: true });
     const { result } = fixture.run();
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /repo-kit is not installed; run bun install/);
+    assert.match(result.stderr, /package-kit is not installed; run bun install/);
   } finally {
     fixture.cleanup();
   }
 });
 
-test("a linked worktree without node_modules uses the main checkout's repo-kit", () => {
+test("a linked worktree without node_modules uses the main checkout's package-kit", () => {
   const fixture = pushFixture({ token: "t" });
   const worktree = `${fixture.root}-worktree`;
   try {

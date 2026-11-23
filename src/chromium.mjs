@@ -77,7 +77,7 @@ const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function wrapperScript({ executable, switches, log }) {
   return [
     "#!/bin/sh",
-    "# repo-kit release-gate: Chromium with software compositing, as on the Linux CI runner.",
+    "# package-kit release-gate: Chromium with software compositing, as on the Linux CI runner.",
     `printf '%s\\n' "$$" >> ${shellQuote(log)}`,
     `exec ${shellQuote(executable)} ${switches.map(shellQuote).join(" ")} "$@"`,
     "",
@@ -137,7 +137,7 @@ if (pw) console.log(pw.chromium.executablePath());`;
  * gpu.featureStatus: what this Chromium actually composites with.
  */
 export async function compositingStatus(executable, { timeout = 30_000 } = {}) {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-chromium-"));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-chromium-"));
   const child = spawn(executable, ["--headless", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   let stderr = "";
   child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-4000); });

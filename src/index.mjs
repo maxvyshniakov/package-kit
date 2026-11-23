@@ -1,4 +1,4 @@
-// What a repository's repo-kit.config.mjs may import.
+// What a repository's package-kit.config.mjs may import.
 export { chain } from "./verify.mjs";
 export { changedPaths, createMatcher, planChecks, planSmoke } from "./plan.mjs";
 export { checkFileBudget, countBytes, countLines, fileBudgetConfig, formatAllowlist, parseAllowlist, parseExemptions, runFileBudget } from "./file-budget.mjs";

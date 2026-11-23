@@ -1,4 +1,4 @@
-# Repo-Kit reference
+# Package-Kit reference
 
 [Overview and quick start](../README.md)
 
@@ -9,16 +9,14 @@ your project's values. The [README](../README.md) explains fit, requirements and
 ## Install
 
 ```sh
-export GITHUB_TOKEN=$(gh auth token)   # read:packages; see "GITHUB_TOKEN" below
-bun add --dev --exact @maxvyshniakov/repo-kit
+bun add --dev --exact @maxvyshniakov/package-kit
 ```
 
-The repository's `bunfig.toml` maps the scope to the registry:
-
-```toml
-[install.scopes]
-maxvyshniakov = { url = "https://npm.pkg.github.com/", token = "$GITHUB_TOKEN" }
-```
+The package is on npmjs.org, so installing it needs no token. A repository's other `@maxvyshniakov` packages on
+GitHub Packages still need the scope in `bunfig.toml` and a token: [GITHUB_TOKEN](#github_token).
+Before the rename it was `@maxvyshniakov/repo-kit` (GitHub Packages, 0.10.0 and older); a repository that still has
+`repo-kit.config.mjs` and no `package-kit.config.mjs` fails with what to rename, and a `REPO_KIT_*` variable that is
+still set is named on stderr with its `PACKAGE_KIT_*` replacement.
 
 Pin the exact version. Each commit is verified by the kit its lockfile records, so the pre-push hook
 checks an older commit with that commit's kit.
@@ -30,41 +28,41 @@ The command names stay as they were, so instructions and skills that name them k
 ```json
 {
   "scripts": {
-    "prepare": "repo-kit hooks install",
-    "verify": "repo-kit verify",
-    "verify:browser": "repo-kit verify --browser",
-    "check:kit": "repo-kit check",
-    "check:changelogs": "repo-kit check-changelogs",
-    "check:consumer": "repo-kit packed-consumer",
-    "release": "repo-kit release",
-    "release:publish": "repo-kit publish",
-    "shoot:stories": "repo-kit shoot"
+    "prepare": "package-kit hooks install",
+    "verify": "package-kit verify",
+    "verify:browser": "package-kit verify --browser",
+    "check:kit": "package-kit check",
+    "check:changelogs": "package-kit check-changelogs",
+    "check:consumer": "package-kit packed-consumer",
+    "release": "package-kit release",
+    "release:publish": "package-kit publish",
+    "shoot:stories": "package-kit shoot"
   }
 }
 ```
 
-`repo-kit verify` and `repo-kit pre-push` take their own slotfather lease (`verify.slots`, `verify.browserSlots`,
-`prePush.slots`). Other heavy scripts wrap themselves: `"check:stories": "repo-kit heavy 2 bun scripts/run-story-checks.mjs"`.
+`package-kit verify` and `package-kit pre-push` take their own slotfather lease (`verify.slots`, `verify.browserSlots`,
+`prePush.slots`). Other heavy scripts wrap themselves: `"check:stories": "package-kit heavy 2 bun scripts/run-story-checks.mjs"`.
 Slotfather priority defaults to `normal`; ticket is optional. For tagged ad-hoc
-runs, use `slotfather run -n K --priority interactive --ticket ID -- repo-kit ...`.
+runs, use `slotfather run -n K --priority interactive --ticket ID -- package-kit ...`.
 The kit detects the inherited lease and does not acquire a second one. Lane
 registration and integration belong to the project's orchestration contract;
-repo-kit owns verification execution rather than lane lifecycle.
+package-kit owns verification execution rather than lane lifecycle.
 
-`REPO_KIT_SLOT_WAIT=<seconds>` makes every lease give up after that long (slotfather exits 75), so a CI job fails with
+`PACKAGE_KIT_SLOT_WAIT=<seconds>` makes every lease give up after that long (slotfather exits 75), so a CI job fails with
 that reason instead of reaching its time limit while queued.
 
 The memory a run may use is the leased slots times slotfather's `gib_per_slot` (for example, 5 GiB per slot), capped
 by the job's cgroup limit and Linux's MemAvailable; without a lease, MemAvailable on Linux and all memory elsewhere.
-On hosts without a per-slot memory budget, cores decide. `REPO_KIT_VERIFY_MEMORY_GIB` and `REPO_KIT_VERIFY_CORES`
+On hosts without a per-slot memory budget, cores decide. `PACKAGE_KIT_VERIFY_MEMORY_GIB` and `PACKAGE_KIT_VERIFY_CORES`
 override the figures.
 
-## repo-kit.config.mjs
+## package-kit.config.mjs
 
 At the repository root. Every field is optional except the steps `verify` runs.
 
 ```js
-import { chain } from "@maxvyshniakov/repo-kit";
+import { chain } from "@maxvyshniakov/package-kit";
 
 export default {
   verify: {
@@ -74,7 +72,7 @@ export default {
       { name: "changelogs", command: ["run", "check:changelogs", ...(release ? ["--", "--release"] : [])], memory: 0.1 },
       { name: "kit", command: ["run", "check:kit"], memory: 0.1 },
       { name: "lint", command: ["run", "lint"], memory: 0.3 },
-      // VITEST_MAX_WORKERS and REPO_KIT_WORKERS from the run's cores and memory;
+      // VITEST_MAX_WORKERS and PACKAGE_KIT_WORKERS from the run's cores and memory;
       // memory here is what it holds besides its workers (default 0.25).
       { name: "unit tests", command: ["run", "test"], usesCores: true },
       { name: "build", command: ["run", "build"], memory: 0.4 },
@@ -104,7 +102,7 @@ export default {
     managed: ["pre-push", "commit-msg"],   // the managed hooks sync writes and check expects; default every one that applies
   },
   release: {
-    gate: "local",  // what publish requires: "local" (default), a passed `repo-kit release-gate`; "ci", the checks workflow
+    gate: "local",  // what publish requires: "local" (default), a passed `package-kit release-gate`; "ci", the checks workflow
     afterCut({ root, released }) {}, // runs after the version is cut, before bun install
   },
   packedConsumer: {
@@ -128,9 +126,9 @@ or of a `publish.notify` target, and, when the steps are built, an unknown key o
 `verify.browser`. The error names the key's path, the nearest known key and the keys the section takes:
 
 ```text
-repo-kit: repo-kit.config.mjs:
+package-kit: package-kit.config.mjs:
   unknown key verify.cheapp; did you mean cheap? It is a key of each verify step (known: steps, browser, slots, ...)
-  adopt: repo-kit adopt was removed in 0.10.0; delete the adopt section
+  adopt: package-kit adopt was removed in 0.10.0; delete the adopt section
 ```
 
 The keys are `CONFIG_KEYS`, `NOTIFY_KEYS` and `STEP_KEYS` in `src/config.mjs`; a test keeps them equal to the keys
@@ -157,7 +155,7 @@ side by side only as far as the lease goes, so the group above runs one check at
 two under a two-slot one; outside a lease (a CI runner without slotfather) one at a time. A step asking more than
 the lease holds runs once no other slot-taking step does, and later slot-taking steps wait behind it. Steps without
 `slots` are limited by memory alone, as before. The step sees its share as
-`REPO_KIT_STEP_SLOTS`, for a check that sizes its own browser pool.
+`PACKAGE_KIT_STEP_SLOTS`, for a check that sizes its own browser pool.
 
 ### Step memory
 
@@ -190,7 +188,7 @@ Each step in `verify.steps` or `verify.browser` (and in `chain()` option objects
 export default {
   verify: {
     inert: ["**/*.md", "docs/**"],
-    runner: ["repo-kit.config.mjs"],
+    runner: ["package-kit.config.mjs"],
     canary: ["unit tests"],
     smoke: ({ plan }) => ["verify:lint", ...plan.checks.filter(r => r.suite === "browser" && !r.producer).map(r => r.id)],
     steps: [
@@ -217,39 +215,39 @@ export default {
 - `runner` + `canary`: when a `runner` path changes, `canary` checks run instead of forcing a full run.
 - `cheap: true`: runs in the cheap-first tier (with its `needs`) before heavier steps; any failure in the cheap tier stops heavier steps from starting.
 - `scopeArgs({ paths, matchedPaths, full, release })`: returns extra CLI arguments appended to `command` on scoped runs (`full: false`), or `[]` on full runs (`full: true`).
-- `smoke`: array of check names/IDs, function `({ paths, plan, checks }) => ids`, or `smoke: true` on steps; queried via `repo-kit-lane --changed --base REF --plan --smoke --json` or `planSmoke()`.
+- `smoke`: array of check names/IDs, function `({ paths, plan, checks }) => ids`, or `smoke: true` on steps; queried via `package-kit-lane --changed --base REF --plan --smoke --json` or `planSmoke()`.
 - Consumers that declare no `inputs`, `always`, `inert`, or `runner` keep the legacy `full: true` behavior unchanged.
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse] [--keep-going]` | Runs the config's steps side by side, within the run's memory. Output streams with a step prefix. The first failure stops the rest (unless `--keep-going` is set, which lets independent steps finish while dependants stay blocked) and prints that step's last 80 lines; a step past its timeout fails and its whole process tree is stopped; a signal stops every step, and a reaper stops them when verify is killed outright. With `--changed [--base REF]` (default `HEAD`), runs only checks whose `inputs` (or transitive `needs` producers' `inputs`) changed, plus `always` checks, falling back to a full run when an unowned path changed (`--plan [--json]` prints the plan without taking a lease or running checks). Steps with `cheap: true` run in the cheap-first tier before heavier steps; a red cheap step stops heavier steps from starting. On a clean committed checkout, passed checks are reused per `(HEAD^{tree}, platform, command, runtime, transitive needs)` unless `--no-reuse`, `REPO_KIT_NO_REUSE=1`, or a local-source override (such as `SID_KIT_SOURCE`) is set (producers still run if any dependent is uncached). Under a `--yieldable` Slotfather lease (`SLOTFATHER_YIELD`), yields between checks when a waiter asks. The summary shows the peak RSS and each step's measured peak beside its declared `memory`: the resident memory of the step's whole process tree, browsers in sessions of their own included, and on Linux the job cgroup's peak. |
+| `verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse] [--keep-going]` | Runs the config's steps side by side, within the run's memory. Output streams with a step prefix. The first failure stops the rest (unless `--keep-going` is set, which lets independent steps finish while dependants stay blocked) and prints that step's last 80 lines; a step past its timeout fails and its whole process tree is stopped; a signal stops every step, and a reaper stops them when verify is killed outright. With `--changed [--base REF]` (default `HEAD`), runs only checks whose `inputs` (or transitive `needs` producers' `inputs`) changed, plus `always` checks, falling back to a full run when an unowned path changed (`--plan [--json]` prints the plan without taking a lease or running checks). Steps with `cheap: true` run in the cheap-first tier before heavier steps; a red cheap step stops heavier steps from starting. On a clean committed checkout, passed checks are reused per `(HEAD^{tree}, platform, command, runtime, transitive needs)` unless `--no-reuse`, `PACKAGE_KIT_NO_REUSE=1`, or a local-source override (such as `SID_KIT_SOURCE`) is set (producers still run if any dependent is uncached). Under a `--yieldable` Slotfather lease (`SLOTFATHER_YIELD`), yields between checks when a waiter asks. The summary shows the peak RSS and each step's measured peak beside its declared `memory`: the resident memory of the step's whole process tree, browsers in sessions of their own included, and on Linux the job cgroup's peak. |
 | `pre-push` | Runs from `.githooks/pre-push`. Verifies each pushed commit in a clean temporary worktree (`--release` for `main`), once per commit. Refuses Bun older than 1.4.4. Skip once with `git push --no-verify`. |
 | `hooks install` | `prepare`: points `core.hooksPath` at `.githooks`, unless someone set another path or `CI` is set. |
 | `hooks sync` | Writes the managed hooks into `.githooks`: a `pre-push` shim and `reference-transaction`; `lane-check` with a `.lanefather.toml`; `commit-msg` with `changelog.paths`. `hooks.managed` keeps only the named ones. Other hooks there are the repository's own, and an existing `commit-msg` of its own is never replaced. |
 | `hooks check` / `hooks status` | The tracked managed hooks match the kit / Git would run every tracked hook. |
-| `check` | `hooks check`. Every `maxvyshniakov/repo-kit/...@` reference in `.github/workflows` names the installed version. `packageManager` names `bun@1.4.4`. |
+| `check` | `hooks check`. Every `maxvyshniakov/package-kit/...@` reference in `.github/workflows` names the installed version. `packageManager` names `bun@1.4.4`. |
 | `check-changelogs [--release]` | Changelog format, version agreement (`package.json`, the newest release, `bun.lock`, quick start archives) and peer ranges. `--release`: no unreleased entries. |
 | `check-changelog-entries <base>..<head>` | The [changelog-entry guard](#changelog-entries) on every commit of the range. Without `changelog.paths`, nothing. |
 | `commit-msg <message file>` | Runs from `.githooks/commit-msg`: the same guard on the commit being made. Skip once with `git commit --no-verify`. |
 | `release [<package>:]<patch\|minor\|major\|x.y.z> [--date=]` | Cuts `## Unreleased` into a version; sets `package.json`, `bun.lock` and the quick start. |
 | `release-gate [<ref>] [--rerun] [--no-attest]` | The local [release gate](#release-gate) on a commit (default `HEAD`): a clean worktree, frozen install, `verify --release`, `verify --browser` with Chromium in software compositing; records the commit status `Library checks (local, <os>-<arch>)`, such as `(local, darwin-arm64)`. `--mode` prints `release.gate`. |
-| `ci-gate` | In a workflow job that needs the checks (`deploy-storybook.yml`): writes `run=true` under gate `local`, or under gate `ci` when every job in `REPO_KIT_NEEDS` (the caller's `toJSON(needs)`) passed. |
+| `ci-gate` | In a workflow job that needs the checks (`deploy-storybook.yml`): writes `run=true` under gate `local`, or under gate `ci` when every job in `PACKAGE_KIT_NEEDS` (the caller's `toJSON(needs)`) passed. |
 | `publish [--resume]` | HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes to `publish.registry` ([npmjs.org](#publishing-to-npmjsorg) packs one archive and checks it first), waits until every registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication: the registries still missing the version, then the tag. |
 | `notify` | Requests `publish.notify`'s workflows again. |
 | `heavy <slots\|all> <command...>` | Runs a command under `slotfather run -n <slots>` when slotfather is on PATH and no lease is held; otherwise directly. |
 | `packed-consumer [--keep]` | Packs (or, from `publish`, takes the archive it is about to upload), installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
 | `shoot <story id filter...> [<url>\|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]` | [Story screenshots](#story-screenshots) from a running Storybook, under a lease of `shoot.slots`. |
-| `serve <dir> [--port N] [--host 127.0.0.1]` | Dependency-free HTTP/1.1 Keep-Alive [static preview server](#static-preview-server) (`@maxvyshniakov/repo-kit/serve`): high socket backlog (`2048`), `Cache-Control: no-cache` for `.html` and `.json`, `public, max-age=31536000, immutable` for hashed `/assets/*`, path-traversal guard (`403`) and clean MIME types. Use instead of `python3 -m http.server`. |
-| `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `repo-kit.config.mjs` too. |
-| `verified-tree` | In a workflow: links each `REPO_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
-| `friction <log\|report\|export>` | Deprecated, moving to Mastack's `friction`; prints a deprecation line on stderr. The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `repo-kit.config.mjs`. |
+| `serve <dir> [--port N] [--host 127.0.0.1]` | Dependency-free HTTP/1.1 Keep-Alive [static preview server](#static-preview-server) (`@maxvyshniakov/package-kit/serve`): high socket backlog (`2048`), `Cache-Control: no-cache` for `.html` and `.json`, `public, max-age=31536000, immutable` for hashed `/assets/*`, path-traversal guard (`403`) and clean MIME types. Use instead of `python3 -m http.server`. |
+| `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `package-kit.config.mjs` too. |
+| `verified-tree` | In a workflow: links each `PACKAGE_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
+| `friction <log\|report\|export>` | Deprecated, moving to Mastack's `friction`; prints a deprecation line on stderr. The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `package-kit.config.mjs`. |
 | `tls`, `adopt`, `rust` | Removed in 0.10.0: each exits 1 and says what to use instead. `publish --prerelease` likewise. |
 
 ## Test hygiene
 
-`repo-kit test-hygiene` scans the test files Git tracks (or would track) and counts, per rule and file:
+`package-kit test-hygiene` scans the test files Git tracks (or would track) and counts, per rule and file:
 
 | Rule | Finds | Allowed |
 |---|---|---|
@@ -259,20 +257,20 @@ export default {
 
 Only the helper exempts an assertion, in the perf suite as anywhere. Each file calling it must match `perfSuite`, or its
 budgets never hold: that fails outright. The perf suite is the repository's own command: it runs those files alone,
-with `REPO_KIT_PERF_BUDGETS=enforce`, and the ordinary test command leaves them out.
+with `PACKAGE_KIT_PERF_BUDGETS=enforce`, and the ordinary test command leaves them out.
 
 The counts live in a baseline (`test-hygiene-baseline.json`) and only shrink:
 
-- `repo-kit test-hygiene --init` writes today's counts; it never overwrites a baseline.
+- `package-kit test-hygiene --init` writes today's counts; it never overwrites a baseline.
 - The check fails when a file gains a finding or a new file has one, naming each line.
 - It fails when a count went down and the baseline still holds the old one: `--update` lowers it (and never raises).
-- Compared with the baseline of the base commit, no entry may rise: `REPO_KIT_HYGIENE_BASE`, else where `HEAD` left
+- Compared with the baseline of the base commit, no entry may rise: `PACKAGE_KIT_HYGIENE_BASE`, else where `HEAD` left
   `origin/HEAD` or `origin/main`, else `HEAD`'s parent on that branch itself. An entry may move with its file: the
   entries of files that no longer exist can be given to new paths.
 - Counts are per file, so one wait can replace another in the same file; the lines are printed when a count grows.
 
 ```js
-// repo-kit.config.mjs, all optional
+// package-kit.config.mjs, all optional
 testHygiene: {
   baseline: "test-hygiene-baseline.json",
   tests: ["**/*.{test,spec}.{js,mjs,cjs,ts,tsx,jsx,mts,cts}", "test/**/*.{js,mjs,cjs,ts,tsx,py}", "tests/**/*.{js,mjs,cjs,ts,tsx,py,rs,swift}", /* ... */],
@@ -285,19 +283,19 @@ testHygiene: {
 
 A budget goes through a `perfBudget(holds, message)` / `perf_budget` helper the repository defines beside its tests:
 it fails a missed budget only in the perf suite, which runs alone on a quiet machine, and elsewhere reports it and
-lets the test go on. `test-hygiene` recognises the helper by its name. (Repo-Kit shipped one as
-`@maxvyshniakov/repo-kit/perf-budget` until 0.10.0.)
+lets the test go on. `test-hygiene` recognises the helper by its name. (Package-Kit shipped one as
+`@maxvyshniakov/package-kit/perf-budget` until 0.10.0.)
 
 ### Adopting it
 
 Nothing runs until a repository adds the step, so a release of the kit turns no gate red. Run
-`repo-kit test-hygiene --init`, commit the baseline, then add the check to the gate:
+`package-kit test-hygiene --init`, commit the baseline, then add the check to the gate:
 
-- **Sid-Kit and Data Grid:** a verify step `{ name: "test hygiene", command: ["run", "repo-kit", "test-hygiene"] }`
+- **Sid-Kit and Data Grid:** a verify step `{ name: "test hygiene", command: ["run", "package-kit", "test-hygiene"] }`
   (or a `check:hygiene` script) and `testHygiene: { ui: true }`. Measured on 2026-11-12: Sid-Kit 2 fixed sleeps,
   2 timing assertions and 757 UI assertions in 239 test files; Data Grid 0, 0 and 87 in 229. Their perf scripts
   (`perf:*`, run under a whole-machine lease) belong in `perfSuite`.
-- **fathers** (Python, no `repo-kit.config.mjs`): `bunx @maxvyshniakov/repo-kit test-hygiene` from the repository
+- **fathers** (Python, no `package-kit.config.mjs`): `bunx @maxvyshniakov/package-kit test-hygiene` from the repository
   root in `tools/check.py`, or a CI step. Measured: 23 fixed sleeps and 9 timing assertions in 85 test files,
   among them godfather's four `assertLess(time.monotonic() - started, ...)`.
 - A scan of a few hundred test files takes 0.1–0.5 s.
@@ -305,7 +303,7 @@ Nothing runs until a repository adds the step, so a release of the kit turns no 
 ## Friction journal
 
 Moments an agent misread or misused a package, one JSON line each, so a retro
-starts from counts instead of transcripts. Producers: `repo-kit friction log`
+starts from counts instead of transcripts. Producers: `package-kit friction log`
 (by hand, or by an agent when the package's skill says so), Sid-Kit's
 `sid-kit-lint` (findings beyond the baseline), and optional Claude Code hooks and
 transcript scanners (mastack). Everything stays on the machine.
@@ -319,7 +317,7 @@ transcript scanners (mastack). Everything stays on the machine.
   them; unknown extra fields are kept and ignored. Renaming or retyping a field
   is version 2.
 - The format's source is [`friction-contract.json`](../friction-contract.json),
-  shipped in the package (`@maxvyshniakov/repo-kit/friction-contract.json`): the
+  shipped in the package (`@maxvyshniakov/package-kit/friction-contract.json`): the
   schema (fields, kinds, limits, validation order and line encoding), how an
   event is built and written (schema order, a long detail cut, an invalid
   event refused with an error), the fingerprint rule (`fingerprint(...parts)`: the first 16 hex
@@ -329,10 +327,10 @@ transcript scanners (mastack). Everything stays on the machine.
   to its problems, including the edge times `Date.parse` takes), fingerprint and
   redact. The table
   below summarises it. A change to its `schema` part needs a new `schema.version`
-  and new cases; repo-kit's tests run every case and hold a hash of the schema
+  and new cases; package-kit's tests run every case and hold a hash of the schema
   part per version.
 - A writer in another language (Mastack's Python hook) keeps a pinned copy with
-  its SHA-256, changed only by copying the file and updating the hash, as repo-kit
+  its SHA-256, changed only by copying the file and updating the hash, as package-kit
   pins Lanefather's `hooks/reference-transaction`, and runs every writer case
   (build, write, validate, fingerprint) against itself.
 
@@ -353,11 +351,11 @@ transcript scanners (mastack). Everything stays on the machine.
 | `fingerprint` | | stable key of the underlying fact, so repeats count apart from distinct facts |
 
 ```sh
-repo-kit friction log --package @scope/kit --kind owner-correction --component Item \
+package-kit friction log --package @scope/kit --kind owner-correction --component Item \
   --detail "Item clamps its description; full text goes in ItemBody"
-repo-kit friction report --since 30d            # kinds, packages, top components, rules and triples
-repo-kit friction report --package @scope/kit --json
-repo-kit friction export --since 30d --out friction.json
+package-kit friction report --since 30d            # kinds, packages, top components, rules and triples
+package-kit friction report --package @scope/kit --json
+package-kit friction export --since 30d --out friction.json
 ```
 
 `report` counts events, distinct facts (fingerprints), sessions and projects per
@@ -377,7 +375,7 @@ a commit that changes a package's shipped paths adds, changes or removes a line 
 `CHANGELOG.md`, or ends its message with the trailer `Changelog: none` and an optional reason.
 
 ```js
-// repo-kit.config.mjs
+// package-kit.config.mjs
 export default {
   changelog: {
     // One package (or globs inside packages/<name>/ when there are several):
@@ -400,7 +398,7 @@ matches no tracked file. With no `changelog.paths` the guard is off.
 | changes one and adds, changes or removes a non-blank, non-heading line under `## Unreleased` of that package's changelog (a revert takes its entry back out) | passes |
 | changes one and carries `Changelog: none` or `Changelog: none (<reason>)` as a trailer | passes |
 | is a merge commit (more than one parent) | exempt |
-| cuts that package's release: its newest changelog release is newer and is the version the manifest now records, as after `repo-kit release` | exempt |
+| cuts that package's release: its newest changelog release is newer and is the version the manifest now records, as after `package-kit release` | exempt |
 | anything else, including only reordering lines or editing older releases' lines | fails, naming the files and the changelog |
 
 The trailer is read as `git interpret-trailers` parses trailers: it belongs to the message's last paragraph, beside
@@ -411,20 +409,20 @@ cover a missing entry.
 
 ### Where it runs
 
-- **commit-msg hook.** `repo-kit hooks sync` writes `.githooks/commit-msg` when `changelog.paths` is set; `repo-kit hooks
+- **commit-msg hook.** `package-kit hooks sync` writes `.githooks/commit-msg` when `changelog.paths` is set; `package-kit hooks
   install` (the `prepare` script) activates `.githooks`. It checks the index against `HEAD`, and against `HEAD`'s
   parent for `git commit --amend`, read from the `git` command line. An amend that line does not show (an alias, a
   hook manager, a GUI) usually keeps `HEAD`'s message: a commit with `HEAD`'s message that fails against `HEAD` is
   checked against its parent too, so the amended commit's entry counts. It skips merges in progress and `fixup!`,
   `squash!` and `amend!` commits, which the range check sees after they are folded in. It runs the installed kit,
-  the main checkout's in a linked worktree, or a `repo-kit` on `PATH` for a repository without `node_modules`. When
+  the main checkout's in a linked worktree, or a `package-kit` on `PATH` for a repository without `node_modules`. When
   it cannot run the kit (none installed, no `node` on the `PATH` Git hooks get, a kit without `commit-msg`) it prints
   one warning naming the fix and lets the commit through: the range check in verify or CI is the backstop.
   `git commit --no-verify` skips it once.
 - **verify step.** `{ name: "changelog entries", command: ["run", "check:changelog-entries"] }` with
-  `"check:changelog-entries": "repo-kit check-changelog-entries origin/main..HEAD"` (the branch commits integrate into).
+  `"check:changelog-entries": "package-kit check-changelog-entries origin/main..HEAD"` (the branch commits integrate into).
   The base must be in the checkout: in CI call `verify.yml` with `fetch-depth: 0`. A range Git cannot resolve fails.
-- **CI on its own.** On a pull request: `repo-kit check-changelog-entries ${{ github.event.pull_request.base.sha }}..${{ github.sha }}`
+- **CI on its own.** On a pull request: `package-kit check-changelog-entries ${{ github.event.pull_request.base.sha }}..${{ github.sha }}`
   after a checkout with `fetch-depth: 0`.
 
 The range form checks every commit of the range against the current checkout's `changelog.paths`: adopt it in a
@@ -434,17 +432,17 @@ commit of its own, or with a base past the commits from before.
 
 A repository's agent instructions can link here and carry this paragraph:
 
-> A commit that changes a shipped path (`changelog.paths` in `repo-kit.config.mjs`) adds or changes a line under
+> A commit that changes a shipped path (`changelog.paths` in `package-kit.config.mjs`) adds or changes a line under
 > `## Unreleased` in that package's `CHANGELOG.md`, in the same commit. When the change is invisible to the package's
 > users (tests, internal refactoring, tooling), end the message with the trailer `Changelog: none (<reason>)` instead.
-> The commit-msg hook and `repo-kit check-changelog-entries` enforce it; merges and release cuts are exempt, and one
+> The commit-msg hook and `package-kit check-changelog-entries` enforce it; merges and release cuts are exempt, and one
 > trailer covers every package the commit changes.
 
 ## Working with Lanefather
 
-Repo-Kit does not orchestrate parallel work; the maintainer's agents follow their own orchestration process.
+Package-Kit does not orchestrate parallel work; the maintainer's agents follow their own orchestration process.
 [Lanefather](https://github.com/maxvyshniakov/fathers/tree/main/lanefather) supplies lanes, path claims, integration, independent
-review and protected-branch promotion for projects that configure it. repo-kit supplies verification and package
+review and protected-branch promotion for projects that configure it. package-kit supplies verification and package
 release/publish commands. Slotfather leases the machine while those commands execute; an active lane itself holds
 no machine slots.
 
@@ -453,9 +451,9 @@ Follow that project's orchestration instructions and configured command (`lanefa
 
 | Phase | Owner and evidence |
 |---|---|
-| Implement and check a lane | Lanefather registers the lane and its claims. Its `check` calls the project's adapter and records a receipt for the committed inputs. repo-kit's verification steps run where the adapter/config selects them. |
+| Implement and check a lane | Lanefather registers the lane and its claims. Its `check` calls the project's adapter and records a receipt for the committed inputs. package-kit's verification steps run where the adapter/config selects them. |
 | Integrate and review | Lanefather `land` merges onto the integration branch, runs the configured post-merge smoke and starts the independent review. Findings receive the project's fix round before promotion. |
-| Publish a batch | Lanefather `promote <sha>` takes the landing lock and pushes an explicit commit. A project with a verified-tree contract gets its configured batch gate. A library without that contract relies on repo-kit's mandatory clean-worktree pre-push gate. |
+| Publish a batch | Lanefather `promote <sha>` takes the landing lock and pushes an explicit commit. A project with a verified-tree contract gets its configured batch gate. A library without that contract relies on package-kit's mandatory clean-worktree pre-push gate. |
 | Release a package | Follow the consumer's publishing contract for its release commit and branches, then run the release gate and publish. Registry publication and consumer adoption remain separate steps. |
 
 A consumer using Lanefather's `dev`/`main` branch policy can use its protected-branch promotion without adopting
@@ -473,37 +471,37 @@ work. Projects sharing batch-gate evidence with a hook must provide that explici
 
 ### Lane verification adapter
 
-`repo-kit-lane` implements [Lanefather's check contract](https://github.com/maxvyshniakov/fathers/tree/main/lanefather#the-check-contract)
+`package-kit-lane` implements [Lanefather's check contract](https://github.com/maxvyshniakov/fathers/tree/main/lanefather#the-check-contract)
 from the consumer's existing `verify.steps` and optional `verify.browser`. It selects all declared checks for each
 change. Check IDs are the suite (`verify` or `browser`), a colon and the URL-encoded step name. Requested checks
 include their dependencies; when both suites run, browser work waits for normal verification. Names and commands
-come entirely from `repo-kit.config.mjs`.
+come entirely from `package-kit.config.mjs`.
 
 A parallel-work consumer tracks `.lanefather.toml` with its own project facts and:
 
 ```toml
 [checks]
 verify = ".githooks/lane-check"
-slot_env = "REPO_KIT_SLOT"
+slot_env = "PACKAGE_KIT_SLOT"
 ```
 
-Run `repo-kit hooks sync` and commit the managed `.githooks/lane-check`. It works in a fresh linked checkout:
+Run `package-kit hooks sync` and commit the managed `.githooks/lane-check`. It works in a fresh linked checkout:
 using the installed kit in this or the main checkout to lease a frozen dependency install, then executing the
 adapter from the target checkout's locked package. Install the main checkout's dependencies once before starting
 lanes. Keep the registry credentials available as for pre-push; the entry also resolves `gh auth token`.
 
-The managed entry prepares dependencies under a one-slot lease even for planning. Direct `repo-kit-lane
---changed --base REF --plan --json` reads configuration and Git without running checks. Execution uses Repo-Kit's
+The managed entry prepares dependencies under a one-slot lease even for planning. Direct `package-kit-lane
+--changed --base REF --plan --json` reads configuration and Git without running checks. Execution uses Package-Kit's
 existing scheduler, cancellation and timeouts. It leases the slots Lanefather gives it with `--jobs` (its check
 contract: verify queues for its own `--jobs`-slot lease), no more than the selected suites' configured `slots` /
 `browserSlots`, and the configured ones without `--jobs`. Where slotfather gives a slot memory (`gib_per_slot`), the
 lease never holds less than the largest selected step's declared `memory`, which can exceed `--jobs`; a smaller lease
-also means a smaller memory budget for side-by-side steps. `REPO_KIT_VERIFY_SLOTS` still overrides it.
-`--jobs` also caps automatically sized worker parallelism. Leases are labelled by lane and phase (`REPO_KIT_SLOT_LABEL`
-plus the phase from `REPO_KIT_SLOT_META`, for example `lane-sk-api-surfaces check`), and elsewhere by project and
+also means a smaller memory budget for side-by-side steps. `PACKAGE_KIT_VERIFY_SLOTS` still overrides it.
+`--jobs` also caps automatically sized worker parallelism. Leases are labelled by lane and phase (`PACKAGE_KIT_SLOT_LABEL`
+plus the phase from `PACKAGE_KIT_SLOT_META`, for example `lane-sk-api-surfaces check`), and elsewhere by project and
 command (`sid-kit verify`, `sid-kit release-gate`, `sid-kit check:stories`), never by a bare directory name.
-Steps that take `slots` share that lease (below). Explicit per-step worker counts remain project configuration. `REPO_KIT_SLOT_LABEL`, `_PRIORITY`, `_TICKET`, `_META` and `_YIELDABLE` carry Lanefather's
-execution context. The adapter honors `--keep-going` to collect independent results; ordinary `repo-kit verify`
+Steps that take `slots` share that lease (below). Explicit per-step worker counts remain project configuration. `PACKAGE_KIT_SLOT_LABEL`, `_PRIORITY`, `_TICKET`, `_META` and `_YIELDABLE` carry Lanefather's
+execution context. The adapter honors `--keep-going` to collect independent results; ordinary `package-kit verify`
 retains its fail-fast behavior. Reports and step logs live under the checkout's Git metadata, not in tracked source.
 
 A run prints `Verification report: <path>` to a version-1 JSON report with the original commit/tree, each check's
@@ -515,7 +513,7 @@ contracts and still run when publishing.
 Adding this adapter does not reconcile a previously published lane that never went through `land`. Keep that
 historical completion separate; changing a published task's metadata does not manufacture its missing evidence.
 
-Repo-kit's own repository has no lane adapter and uses one active `main` branch. Its task-worktree process is in
+Package-Kit's own repository has no lane adapter and uses one active `main` branch. Its task-worktree process is in
 [orchestration](agents/orchestration.md); the explicit-SHA push, pre-push gate and CI procedure is in
 [publishing](agents/publishing.md).
 
@@ -528,7 +526,7 @@ bun run shoot:stories -- showcase --browser=chromium,firefox,webkit,safari
 bun run shoot:stories -- http://127.0.0.1:6020 badge --viewport     # no full page
 ```
 
-`repo-kit shoot` screenshots every story whose id contains one of the filters, in each theme (the `theme` global),
+`package-kit shoot` screenshots every story whose id contains one of the filters, in each theme (the `theme` global),
 width (900 px high) and browser, and prints each file: `<out>/<story-id>-<theme>-<width>.png`, with `-<browser>`
 appended for every browser but Chromium. The defaults are `--theme=light --width=1280 --browser=chromium`, full-page
 pictures, and `--out` `<tmpdir>/<repository folder>-shots`. A full page taller than 16384 px is cut to its top 16384 px
@@ -555,7 +553,7 @@ then fails naming them.
 | `webkit` | Playwright's WebKit. It renders like Safari but has none of Safari's scrolling or settings: static layout only. |
 | `safari` | Real Safari Technology Preview through the background transport. Viewport pictures only; `fullPage` is ignored. |
 
-Playwright stays the repository's own pinned devDependency: repo-kit declares it as an optional peer (`>=1.50.0`)
+Playwright stays the repository's own pinned devDependency: package-kit declares it as an optional peer (`>=1.50.0`)
 and loads it from the repository root, and `safari` needs none. `firefox` needs Firefox installed and Playwright 1.57
 or later, the first that launches the `moz-firefox` channel; on an older one `--browser=firefox` fails before it
 starts, naming both versions, and the other browsers run as before.
@@ -574,26 +572,26 @@ acceptance must include frontmost monitoring, viewport cropping and cleanup; moc
 do not establish those properties on a machine.
 
 ```js
-// repo-kit.config.mjs; every field is optional
+// package-kit.config.mjs; every field is optional
 export default {
   shoot: { url: "http://127.0.0.1:6010", storybookDir: "apps/storybook", slots: 1 },
 };
 ```
 
 The background transport pieces (`acquireLock`, `startPage`, `backgroundLaunchArgs`) are exported
-as `@maxvyshniakov/repo-kit/safari-background` so native gesture harnesses can share the same
+as `@maxvyshniakov/package-kit/safari-background` so native gesture harnesses can share the same
 lock and page bridge after adopting this release, instead of maintaining copied launchers.
 
-The module is exported as `@maxvyshniakov/repo-kit/shoot` (`parseShootArgs`, `launchBrowser`, `shootStories`) for a
+The module is exported as `@maxvyshniakov/package-kit/shoot` (`parseShootArgs`, `launchBrowser`, `shootStories`) for a
 check that needs the same engines.
 
 ## Static preview server
 
 ```sh
-repo-kit serve apps/storybook/storybook-static --port 6020 --host 127.0.0.1
+package-kit serve apps/storybook/storybook-static --port 6020 --host 127.0.0.1
 ```
 
-`repo-kit serve <dir> [--port N] [--host 127.0.0.1]` runs a dependency-free Node HTTP/1.1 Keep-Alive static preview
+`package-kit serve <dir> [--port N] [--host 127.0.0.1]` runs a dependency-free Node HTTP/1.1 Keep-Alive static preview
 server (defaults: `--port 6010 --host 127.0.0.1`, backlog `2048`, `keepAliveTimeout` 65 s). Use it instead of
 `python3 -m http.server` for Storybook static builds and local previews:
 
@@ -601,21 +599,21 @@ server (defaults: `--port 6010 --host 127.0.0.1`, backlog `2048`, `keepAliveTime
   no `Cache-Control` headers. Behind an HTTP/2 reverse proxy (`tailscale serve`), Safari's cold first load fires
   ~45 concurrent ES module requests (`assets/*.js`), resetting sockets (`502` / `Importing a module script failed.`)
   and serving stale `iframe.html` across rebuilds.
-- `repo-kit serve` keeps HTTP/1.1 connections alive with a `2048` listen backlog, supports `GET` and `HEAD`, serves
+- `package-kit serve` keeps HTTP/1.1 connections alive with a `2048` listen backlog, supports `GET` and `HEAD`, serves
   `Cache-Control: no-cache` on `.html` and `.json` (`iframe.html`, `index.json`) and
   `public, max-age=31536000, immutable` on hashed `/assets/*`, rejects path traversal and escaping symlinks with
   `403`, answers `404` on missing files, and shuts down cleanly on `SIGINT`/`SIGTERM`.
-- Exported as `@maxvyshniakov/repo-kit/serve` (`startStaticServer`, `parseServeArgs`, `runServe`, `mimeTypeFor`,
+- Exported as `@maxvyshniakov/package-kit/serve` (`startStaticServer`, `parseServeArgs`, `runServe`, `mimeTypeFor`,
   `cacheControlFor`, `resolveStaticFile`, `MIME_TYPES`).
 
 ## Release gate
 
-`publish` publishes a commit only after the release gate passed on it. `repo-kit.config.mjs` chooses the gate with one
+`publish` publishes a commit only after the release gate passed on it. `package-kit.config.mjs` chooses the gate with one
 line:
 
 ```js
 export default {
-  release: { gate: "local" }, // the default: a local run of repo-kit release-gate
+  release: { gate: "local" }, // the default: a local run of package-kit release-gate
   // release: { gate: "ci" }, // the configured remote checks workflow
 };
 ```
@@ -627,11 +625,11 @@ configured remote workflow results rather than a local gate.
 ### Gate `local`
 
 ```sh
-git fetch origin && bun run repo-kit release-gate origin/main   # after the release commit is pushed
+git fetch origin && bun run package-kit release-gate origin/main   # after the release commit is pushed
 bun run release:publish
 ```
 
-`repo-kit release-gate [<ref>]` (default `HEAD`) runs under one slotfather lease (the larger of `verify.slots` and
+`package-kit release-gate [<ref>]` (default `HEAD`) runs under one slotfather lease (the larger of `verify.slots` and
 `verify.browserSlots`):
 
 1. the Bun floor and the token, before any install;
@@ -642,19 +640,19 @@ bun run release:publish
    a check's own `chromium.launch`) runs through it, because the gate points `PLAYWRIGHT_BROWSERS_PATH` at the mirror.
    Before the checks, the gate asks the wrapped Chromium (DevTools `SystemInfo.getInfo`) and stops unless it reports
    `gpu_compositing: disabled_software`; on a Mac the same Chromium reports `enabled` (Metal) without the switch.
-   `REPO_KIT_CHROMIUM_SWITCHES` names the switches for a runner that starts a browser of its own;
+   `PACKAGE_KIT_CHROMIUM_SWITCHES` names the switches for a runner that starts a browser of its own;
 4. `bun run verify -- --release`;
 5. `bun run verify -- --browser` when the commit's config declares `verify.browser`. The gate fails if that starts no
    Chromium through the mirror, and fails if the commit declares browser checks but has no Playwright.
 
 On a pass it records the commit status `Library checks (local, darwin-arm64)` (the gate's `<os>-<arch>`, in Node's
-names) and, with the same state, the deprecated `Library checks (local, macOS)` (`Linux`, `Windows`) that repo-kit 0.6.0
+names) and, with the same state, the deprecated `Library checks (local, macOS)` (`Linux`, `Windows`) that package-kit 0.6.0
 and older wrote, so a branch protection rule requiring the old name keeps passing; the next batched minor release stops
 writing the old name. The status carries a summary: host, duration, kit version,
-the number of software-compositing Chromium launches, and the local log, `.git/repo-kit-gate/<sha>.log`. A failure
+the number of software-compositing Chromium launches, and the local log, `.git/package-kit-gate/<sha>.log`. A failure
 records `failure`. Without a token with `repo` scope it refuses to start.
 
-A commit that passed is listed in `.git/repo-kit-gate/passed` and is not run again: a commit GitHub did not have yet
+A commit that passed is listed in `.git/package-kit-gate/passed` and is not run again: a commit GitHub did not have yet
 passes, and the run after the push only records its status. `--rerun` runs it again; `--no-attest` records nothing on
 GitHub.
 
@@ -679,7 +677,7 @@ nothing waits for them.
 | Job | Gate `local` | Gate `ci` |
 |---|---|---|
 | `check.yml`: `verify.yml`, `browser.yml` | advisory | `publish` waits for the run |
-| `deploy-storybook.yml` | runs whatever the checks concluded (`repo-kit ci-gate`) | runs only after every needed job passed |
+| `deploy-storybook.yml` | runs whatever the checks concluded (`package-kit ci-gate`) | runs only after every needed job passed |
 | Data Grid's `dependency-release` (`release.yml`) | stays behind its own check jobs in CI | the same |
 
 The deploy and Data Grid's catalog automation stay in CI because they need the `storybook` environment's Cloudflare
@@ -689,7 +687,7 @@ a caller left as before still deploys only after its checks passed. A deploy cou
 (`bun run storybook:prepare-deploy && bun run storybook:deploy` with `CLOUDFLARE_API_TOKEN` set), which would take
 the runner out of the release path entirely; it is not wired up.
 
-Repo-Kit does not need branch protection or a ruleset: the commit statuses are the record and `publish` the
+Package-Kit does not need branch protection or a ruleset: the commit statuses are the record and `publish` the
 enforcement. If a repository enables protection, require `Library checks (local, darwin-arm64)` under gate `local`, or the
 `check.yml` jobs under gate `ci`, not both. A rule that still requires the deprecated `Library checks (local, macOS)`
 passes until the next batched minor; move it to the new context before then.
@@ -766,17 +764,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
-    uses: maxvyshniakov/repo-kit/.github/workflows/verify.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v0.10.0
   browser:
-    uses: maxvyshniakov/repo-kit/.github/workflows/browser.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/browser.yml@v0.10.0
     with:
       checks: '[{"name": "stories", "run": "bun run check:stories -- --no-build"}]'
-  # !cancelled() lets the deploy start when a check failed; repo-kit ci-gate then
+  # !cancelled() lets the deploy start when a check failed; package-kit ci-gate then
   # deploys under release.gate "local" and does nothing under "ci".
   deploy:
     needs: [check, browser]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    uses: maxvyshniakov/repo-kit/.github/workflows/deploy-storybook.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/deploy-storybook.yml@v0.10.0
     with:
       url: https://catalog.example.com
       needs: ${{ toJSON(needs) }}
@@ -787,9 +785,9 @@ jobs:
 |---|---|
 | `verify.yml` | `args` (none; `--release` is added for `main` and pull requests into `main`), `slots` (`all`), `slot-wait` (0: wait as long as the job runs), `runner`, `timeout-minutes` (20), `fetch-depth` (1; 0 for a [changelog-entries](#changelog-entries) range step), `verified-url`, `junit`, `junit-artifact` |
 | `browser.yml` | `checks` (JSON list of `{name, run}`), `build`, `playwright` (true), `slots` (`all`: the build and every check lease them together), `slot-wait` (0), `runner`, `timeout-minutes` (45: the wait, the build and every check), `verified-url`, `junit`, `junit-artifact` |
-| `deploy-storybook.yml` | `url`, `needs` (the caller's `toJSON(needs)`, for `repo-kit ci-gate`; default `{}`), `environment` (`storybook`), `runner`, `slots` (`all`, for the builds and `storybook:prepare-deploy`), `slot-wait` (0), `timeout-minutes` (30); `STORYBOOK_CLOUDFLARE_API_TOKEN` from that environment, with `secrets: inherit` |
+| `deploy-storybook.yml` | `url`, `needs` (the caller's `toJSON(needs)`, for `package-kit ci-gate`; default `{}`), `environment` (`storybook`), `runner`, `slots` (`all`, for the builds and `storybook:prepare-deploy`), `slot-wait` (0), `timeout-minutes` (30); `STORYBOOK_CLOUDFLARE_API_TOKEN` from that environment, with `secrets: inherit` |
 | `release.yml` | `command` (`bun run release:publish`), `enabled` (true), `slots` (`all`), `slot-wait` (0), `runner`, `timeout-minutes` (30); the caller grants `contents: write`, `packages: write` |
-| `actions/npm-publish` (an action, in the caller's own job) | `command` (`bun run release:publish`), `node-version` (24), `npm-version` (11.19.1; 11.5.1 or newer), `slots` (`all`), `slot-wait` (0), `token`; the job grants `contents: write`, `id-token: write`. See [publishing to npmjs.org](#publishing-to-npmjsorg) |
+| `actions/npm-publish` (an action, in the caller's own job) | `command` (`bun run release:publish`), `kit` (`node_modules/.bin/package-kit`, which leases the publication; package-kit's own workflow passes `src/cli.mjs`), `node-version` (24), `npm-version` (11.19.1; 11.5.1 or newer), `slots` (`all`), `slot-wait` (0), `token`; the job grants `contents: write`, `id-token: write`. See [publishing to npmjs.org](#publishing-to-npmjsorg) |
 | `verified-tree.yml` | `plans` (required), `branches` (`["main", "dev"]`), `depth` (100), `force` (false), `platform` (the lookup runner's), `runner`; outputs `urls`, `tree`, `platform`; the caller grants `contents: read`, `checks: read`, `statuses: read`, `actions: read` to this job |
 
 `runner` is `runs-on` as JSON and defaults to `'["ubuntu-latest"]'`. A private repository may name a self-hosted
@@ -803,10 +801,10 @@ Every heavy step of these workflows runs under a slotfather lease where the runn
 browser build and checks, the Storybook builds and `storybook:prepare-deploy`, and the release command. What runs
 outside one is light: checkout, `bun install`, the cached Playwright browser and the Cloudflare upload.
 `slots` defaults to `all`, the whole runner, so no heavy job runs beside another and each gets the runner's memory; a job waits
-for the lease instead. `verify.yml` passes `slots` to verify as `REPO_KIT_VERIFY_SLOTS`, which overrides
+for the lease instead. `verify.yml` passes `slots` to verify as `PACKAGE_KIT_VERIFY_SLOTS`, which overrides
 `verify.slots` and `verify.browserSlots`.
 
-`browser.yml` builds once and runs its checks one after another in one job, `repo-kit checks`: every check runs,
+`browser.yml` builds once and runs its checks one after another in one job, `package-kit checks`: every check runs,
 after a failed one too, and the job fails naming the failed ones. Under a lease of the whole runner a job per check
 could not run side by side with another anyway, and each built Storybook again: three concurrent builds exhausted a
 10 GiB runner. Set
@@ -815,7 +813,7 @@ could not run side by side with another anyway, and each built Storybook again: 
 ### Skipping a verified tree
 
 A check result belongs to a tree and a plan, not to a branch or a commit. The tree (`git rev-parse <sha>^{tree}`)
-holds the workflow files, `repo-kit.config.mjs` and the lockfile, so two commits with one tree run the same checks
+holds the workflow files, `package-kit.config.mjs` and the lockfile, so two commits with one tree run the same checks
 the same way: promoting dev to main, merging a pull request that was up to date, or a nightly run on an unchanged
 main. `verified-tree.yml` looks for such a result before the heavy jobs start:
 
@@ -850,9 +848,9 @@ main. `verified-tree.yml` looks for such a result before the heavy jobs start:
    runs every plan.
 
 The lookup checks nothing out and installs nothing: `actions/verified-tree` runs `src/verified-tree.mjs` with
-Node against GitHub's API. When GitHub cannot answer, every plan runs. `repo-kit verified-tree` is the same step
-for a job of your own (`REPO_KIT_PLANS`, `REPO_KIT_BRANCHES`, `REPO_KIT_DEPTH`, `REPO_KIT_HEAD_SHA`,
-`REPO_KIT_PLATFORM`, `GITHUB_TOKEN`).
+Node against GitHub's API. When GitHub cannot answer, every plan runs. `package-kit verified-tree` is the same step
+for a job of your own (`PACKAGE_KIT_PLANS`, `PACKAGE_KIT_BRANCHES`, `PACKAGE_KIT_DEPTH`, `PACKAGE_KIT_HEAD_SHA`,
+`PACKAGE_KIT_PLATFORM`, `GITHUB_TOKEN`).
 
 The runner is outside the tree too, which is why the platform is part of the plan: a local gate status on the Mac
 stands only for a lookup whose `platform` is the Mac's.
@@ -870,8 +868,8 @@ checks off docs-only pull requests, or drop the filter there.
 
 `junit` names paths or globs (one per line) of JUnit reports the job's commands write, for example a test runner's
 `--reporter=junit` output; after the job they are uploaded as the artifact `junit-artifact` (default
-`junit-<job>-<attempt>`) for 30 days, after a failed or timed-out job too. In `browser.yml`, `repo-kit checks` also writes its per-check results and
-times to `repo-kit-junit/checks.xml` (`REPO_KIT_CHECKS_JUNIT`) and that file is uploaded with them. A workflow
+`junit-<job>-<attempt>`) for 30 days, after a failed or timed-out job too. In `browser.yml`, `package-kit checks` also writes its per-check results and
+times to `package-kit-junit/checks.xml` (`PACKAGE_KIT_CHECKS_JUNIT`) and that file is uploaded with them. A workflow
 calling `browser.yml` twice with `junit` gives each call its own `junit-artifact`.
 
 Jobs show as `<caller job> / <reusable job>`, for example `check / verify`, `browser / browser + stories` (named by
@@ -881,9 +879,9 @@ A cancelled run counts as failed for `publish` under gate `ci`, so `cancel-in-pr
 
 `actions/setup-bun` installs Bun 1.4.4, then runs `bun install --frozen-lockfile` with `token`.
 Jobs that do not use a reusable workflow call it directly:
-`uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.10.0`.
+`uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0`.
 
-Any repository can call these while repo-kit is public. A private copy needs its Settings → Actions → General →
+Any repository can call these while package-kit is public. A private copy needs its Settings → Actions → General →
 Access set to "Accessible from repositories owned by the user".
 
 The default `runner`, `["self-hosted", "homelab"]`, is the maintainer's runner; pass your own. The verification,
@@ -893,7 +891,7 @@ None of the workflows uses `pull_request_target`. Do not route pull requests fro
 
 ## Versioning
 
-repo-kit follows the same changelog rules as the libraries. Consumer-visible changes go under `## Unreleased`.
+package-kit follows the same changelog rules as the libraries. Consumer-visible changes go under `## Unreleased`.
 Changelog sections: Breaking, Added, Changed, Deprecated, Removed, Fixed and Security. Before 1.0.0, a breaking
 change is a minor release.
 
@@ -915,22 +913,24 @@ change is a minor release.
 
 A release:
 
-1. Cut the version with `bun run release -- <patch|minor|major>`. This also moves every `maxvyshniakov/repo-kit/...@v`
+1. Cut the version with `bun run release -- <patch|minor|major>`. This also moves every `maxvyshniakov/package-kit/...@v`
    reference in the workflows, README and this reference to the new tag. The reusable workflows reference the action at that
    tag, which `publish` creates on the release commit.
 2. Push the release commit to `main`.
-3. Run `bun run repo-kit release-gate origin/main`, then `bun run release:publish` (gate `local`, this repository's
-   default). Under gate `ci`, run `release:publish` once Library checks pass on `main`; repo-kit's own checks use
-   `./actions/setup-bun` from the commit itself, so they run before the tag exists.
-4. Raise the pinned version in each repository and run `bun run repo-kit hooks sync`. Update the workflow references;
-   `repo-kit check` fails until they match.
+3. Run `gh workflow run release-npm.yml --repo maxvyshniakov/package-kit --ref main`. Its `check` job runs
+   `verify --release`; its `publish` job publishes to npmjs.org with trusted publishing and provenance, then tags the
+   release commit (`publish` refuses npmjs.org outside GitHub Actions). Both use `./actions/...` from the commit
+   itself, so they run before the tag exists. npmjs.org trusts that workflow file once, the owner's step:
+   `npm trust github @maxvyshniakov/package-kit --file release-npm.yml --repo maxvyshniakov/package-kit`.
+4. Raise the pinned version in each repository and run `bun run package-kit hooks sync`. Update the workflow references;
+   `package-kit check` fails until they match.
 
 ## Developing
 
 `bun run verify` runs:
 
 - the changelog check;
-- `repo-kit check` on this repository;
+- `package-kit check` on this repository;
 - a comparison of `hooks/reference-transaction` with Lanefather's canonical copy (skipped without a checkout);
 - the tests;
 - the packed-consumer check.
@@ -945,9 +945,9 @@ Agent commands and repository policy: [checks](agents/checks.md),
 [publishing](agents/publishing.md), [orchestration](agents/orchestration.md).
 
 `hooks/reference-transaction` comes from Lanefather's `hooks/reference-transaction`: one writer for `main` and
-`dev`, using the landing lock held by `lanefather promote` (or the project's configured entry point). repo-kit
+`dev`, using the landing lock held by `lanefather promote` (or the project's configured entry point). package-kit
 distributes the exact copy, pinned by `REFERENCE_TRANSACTION_SHA256` in `src/hooks.mjs`, and installs it in
-consumers' managed hooks. Repo-kit's own single-branch checkout omits it. `check:upstream` compares it with
+consumers' managed hooks. Package-Kit's own single-branch checkout omits it. `check:upstream` compares it with
 `LANEFATHER_DIR/hooks/reference-transaction`; the checkout defaults to `~/lanefather` and the check is skipped
 without one. `LANEFATHER_DIR` selects a
 source checkout for this comparison, not the runtime engine.

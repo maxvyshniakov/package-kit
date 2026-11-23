@@ -13,7 +13,7 @@ let binary;
 function tool() {
   if (binary) return binary;
   const hash = createHash('sha256').update(readFileSync(source)).digest('hex').slice(0, 16);
-  const dir = path.join(homedir(), 'Library/Caches/repo-kit'); mkdirSync(dir, { recursive: true });
+  const dir = path.join(homedir(), 'Library/Caches/package-kit'); mkdirSync(dir, { recursive: true });
   const target = path.join(dir, `BackgroundSafari-${hash}`);
   if (!existsSync(target)) execFileSync('swiftc', ['-O', '-swift-version', '5', '-o', target, source]);
   return binary = target;
@@ -65,14 +65,14 @@ export function createSafariSystem({ exec = execFileSync, native = call, asyncNa
   },
   place: async (pid, { width, height }) => native('place', pid, width, height),
   async capture(pid, output, [width, height]) {
-    const window = native('window', pid), dir = mkdtempSync(path.join(tmpdir(), 'repo-kit-safari-'));
+    const window = native('window', pid), dir = mkdtempSync(path.join(tmpdir(), 'package-kit-safari-'));
     try {
       const raw = path.join(dir, 'window.png');
       exec('/usr/sbin/screencapture', ['-x', '-o', '-l', String(window.id), raw]);
       native('crop', raw, output, window.bounds.Width, window.bounds.Height, width, height);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   },
-  quit: async pid => asyncNative(['quit', pid]), warn: message => console.warn(`repo-kit: ${message}`),
+  quit: async pid => asyncNative(['quit', pid]), warn: message => console.warn(`package-kit: ${message}`),
 };
 }
 export const safariSystem = createSafariSystem();

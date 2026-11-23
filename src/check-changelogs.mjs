@@ -1,12 +1,12 @@
 // Checks every released package's CHANGELOG.md against the changelog policy.
 //
-//   repo-kit check-changelogs            format; package.json version = newest release;
+//   package-kit check-changelogs            format; package.json version = newest release;
 //                                        for a workspace package, bun.lock's entry;
 //                                        quick start archive names; peer ranges
-//   repo-kit check-changelogs --release  also require an empty "## Unreleased"
+//   package-kit check-changelogs --release  also require an empty "## Unreleased"
 //
 // CI runs the --release form: a change reaches main only after its entries
-// were cut into a version with `repo-kit release`.
+// were cut into a version with `package-kit release`.
 import fs from "node:fs";
 import path from "node:path";
 

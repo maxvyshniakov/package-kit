@@ -104,7 +104,7 @@ function repository(files, config = "export default {};\n") {
   const env = isolatedGitEnv();
   const git = (...args) => execFileSync("git", args, { cwd: root, env, stdio: "pipe" });
   git("init", "-q", "-b", "main");
-  if (config !== null) fs.writeFileSync(path.join(root, "repo-kit.config.mjs"), config);
+  if (config !== null) fs.writeFileSync(path.join(root, "package-kit.config.mjs"), config);
   write(root, files);
   return { root, git, commit: () => { git("add", "-A"); git("commit", "-q", "-m", "change"); } };
 }
@@ -148,7 +148,7 @@ test("--init records today's counts; the check then passes and the baseline only
   write(repo.root, { "test/a.test.mjs": sleepy(1), "test/c.test.mjs": null });
   const stale = run(repo.root);
   assert.equal(stale.code, 1);
-  assert.match(stale.err, /fixed-sleep in test\/a\.test\.mjs went down to 1 \(baseline 2\); run repo-kit test-hygiene --update/);
+  assert.match(stale.err, /fixed-sleep in test\/a\.test\.mjs went down to 1 \(baseline 2\); run package-kit test-hygiene --update/);
   const updated = run(repo.root, ["--update"]);
   assert.equal(updated.code, 0, updated.err);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repo.root, "test-hygiene-baseline.json"), "utf8")).rules["fixed-sleep"], { "test/a.test.mjs": 1 });
@@ -205,7 +205,7 @@ test("a raise committed on a branch fails against where it left main; a renamed 
   assert.equal(run(repo.root).code, 0);
 });
 
-test("a broken repo-kit.config.mjs fails the command instead of falling back to the defaults", () => {
+test("a broken package-kit.config.mjs fails the command instead of falling back to the defaults", () => {
   const repo = repository({ "test/a.test.mjs": "ok\n" }, "export default {;\n");
   const result = spawnSync(process.execPath, [path.join(kitRoot, "src/cli.mjs"), "test-hygiene"], { cwd: repo.root, encoding: "utf8" });
   assert.equal(result.status, 1);
@@ -222,7 +222,7 @@ test("UI assertions are opt-in", () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(other.root, "test-hygiene-baseline.json"), "utf8")).rules["ui-assertion"], undefined);
 });
 
-test("repo-kit test-hygiene runs in a repository without repo-kit.config.mjs, as a Python one", () => {
+test("package-kit test-hygiene runs in a repository without package-kit.config.mjs, as a Python one", () => {
   const repo = repository({ "tests/test_a.py": "import time\ntime.sleep(1)\n" }, null);
   const cli = path.join(kitRoot, "src/cli.mjs");
   const init = spawnSync(process.execPath, [cli, "test-hygiene", "--init"], { cwd: path.join(repo.root, "tests"), encoding: "utf8" });

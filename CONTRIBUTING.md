@@ -1,6 +1,6 @@
 # Contributing
 
-Repo-Kit is one maintainer's tooling, shared as a reference. Issues with a reproduction are welcome. Pull requests
+Package-Kit is one maintainer's tooling, shared as a reference. Issues with a reproduction are welcome. Pull requests
 are read, but a change that adds scope or alters a command's behavior may be declined to keep the kit small; open an
 issue first for anything beyond a small fix.
 

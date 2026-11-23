@@ -115,7 +115,7 @@ test("a declined tag push names the commands that retag as the account's noreply
 });
 
 test("GIT_COMMITTER_EMAIL sets an annotated tag's tagger without touching git config", () => {
-  const repository = mkdtempSync(path.join(tmpdir(), "repo-kit-tagger-"));
+  const repository = mkdtempSync(path.join(tmpdir(), "package-kit-tagger-"));
   try {
     const git = (args, env = {}) => execFileSync("git", args, { cwd: repository, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", ...env } }).trim();
     git(["init", "--quiet"]);
@@ -142,7 +142,7 @@ test("publish notifies only after tagging", () => {
 });
 
 test("--resume finds the release commit even after later commits touched package.json", () => {
-  const repository = mkdtempSync(path.join(tmpdir(), "repo-kit-release-commit-"));
+  const repository = mkdtempSync(path.join(tmpdir(), "package-kit-release-commit-"));
   try {
     const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "a", GIT_AUTHOR_EMAIL: "a@b", GIT_COMMITTER_NAME: "a", GIT_COMMITTER_EMAIL: "a@b" } }).trim();
     const manifest = (version, extra = {}) => writeFileSync(path.join(repository, "package.json"), `${JSON.stringify({ name: "x", version, ...extra }, null, 2)}\n`);
@@ -205,7 +205,7 @@ test("publish follows release.gate: the local attestation before bun publish, or
 });
 
 test("publish refuses a repository without package.json before any token", async () => {
-  const repository = tempRepository({ "pyproject.toml": '[project]\nname = "example"\nversion = "0.2.0"\n', "repo-kit.config.mjs": "export default {};\n" });
+  const repository = tempRepository({ "pyproject.toml": '[project]\nname = "example"\nversion = "0.2.0"\n', "package-kit.config.mjs": "export default {};\n" });
   try {
     const config = withDefaults({});
     config.root = repository.root;
@@ -255,8 +255,8 @@ test("--provenance goes to npm only for a public package from a public repositor
   assert.equal(provenanceWanted({ repositoryPublic: true, access: "public" }), true);
   assert.equal(provenanceWanted({ repositoryPublic: false, access: "public" }), false, "npm refuses provenance from a private repository");
   assert.equal(provenanceWanted({ repositoryPublic: true, access: "restricted" }), false);
-  const tarball = "/tmp/work/maxvyshniakov-repo-kit-1.0.0.tgz";
-  assert.deepEqual(npmPublishArguments({ tarball, name: "@maxvyshniakov/repo-kit", access: "public", provenance: true }), [
+  const tarball = "/tmp/work/maxvyshniakov-package-kit-1.0.0.tgz";
+  assert.deepEqual(npmPublishArguments({ tarball, name: "@maxvyshniakov/package-kit", access: "public", provenance: true }), [
     "publish", tarball,
     `--userconfig=${devNull}`,
     "--registry=https://registry.npmjs.org/",
@@ -394,7 +394,7 @@ test("--resume publishes only to the registries still missing the version", () =
 });
 
 test("a resumed publication uploads the bytes a registry already serves, checked against its integrity", async () => {
-  const workDir = mkdtempSync(path.join(tmpdir(), "repo-kit-archive-"));
+  const workDir = mkdtempSync(path.join(tmpdir(), "package-kit-archive-"));
   try {
     const pkg = { name, version: "1.2.0" };
     const served = { ...attested, dist: { ...attested.dist, tarball: "https://npm.pkg.github.com/download/x.tgz" } };

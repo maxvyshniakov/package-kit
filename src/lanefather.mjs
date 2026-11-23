@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Lanefather's verification command contract over the consumer's Repo-Kit steps.
+// Lanefather's verification command contract over the consumer's Package-Kit steps.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { loadConfig } from './config.mjs';
+import { legacyEnvironmentWarnings, loadConfig } from './config.mjs';
 import { cleanEnvironment, gitRunner } from './git.mjs';
 import { runVerify, verifySteps } from './verify.mjs';
 import { capacity, hasLease, leaseSelf, verifyLeaseSlots } from './slotfather.mjs';
@@ -31,13 +31,14 @@ export function laneLeaseSlots(config, selected, jobs = Infinity, { gibPerSlot =
 }
 
 export async function main(args) {
+  for (const warning of legacyEnvironmentWarnings()) console.error(warning);
   const { values } = parseArgs({ args, options: {
     help: { type: 'boolean' }, changed: { type: 'boolean' }, base: { type: 'string' }, plan: { type: 'boolean' },
     smoke: { type: 'boolean' }, json: { type: 'boolean' }, checks: { type: 'string' }, suites: { type: 'string' },
     'keep-going': { type: 'boolean' }, 'no-reuse': { type: 'boolean' }, jobs: { type: 'string' },
   } });
   if (values.help) {
-    console.log('Usage: repo-kit-lane --changed --base REF --plan [--smoke] --json\n       repo-kit-lane [--checks IDS [--base REF] | --suites SUITES] [--keep-going] [--no-reuse] [--jobs N]');
+    console.log('Usage: package-kit-lane --changed --base REF --plan [--smoke] --json\n       package-kit-lane [--checks IDS [--base REF] | --suites SUITES] [--keep-going] [--no-reuse] [--jobs N]');
     return 0;
   }
   const gitEnv = cleanEnvironment();
@@ -87,15 +88,15 @@ export async function main(args) {
     selected = checks.filter(check => suites.includes(check.suite));
   }
   if (!selected.length) throw new Error('no configured checks selected');
-  // The label names the lane (REPO_KIT_SLOT_LABEL, from Lanefather) and the phase, e.g. "lane-sk-api-surfaces check".
+  // The label names the lane (PACKAGE_KIT_SLOT_LABEL, from Lanefather) and the phase, e.g. "lane-sk-api-surfaces check".
   let phase = 'check';
-  try { phase = JSON.parse(gitEnv.REPO_KIT_SLOT_META || '{}').phase || phase; } catch { /* leasedCommand reports bad metadata */ }
+  try { phase = JSON.parse(gitEnv.PACKAGE_KIT_SLOT_META || '{}').phase || phase; } catch { /* leasedCommand reports bad metadata */ }
   const lease = Number.isFinite(jobs) && !hasLease(gitEnv) ? laneLeaseSlots(config, selected, jobs, { gibPerSlot: capacity().gib_per_slot ?? 0 }) : laneLeaseSlots(config, selected, jobs);
   if (await leaseSelf(verifyLeaseSlots(lease), { env: gitEnv, purpose: phase })) return process.exitCode;
   const git = gitRunner(config.root, { env: gitEnv });
   const head = git('rev-parse', 'HEAD'), tree = git('rev-parse', 'HEAD^{tree}');
   if (git('status', '--porcelain')) throw new Error('verification requires a clean committed checkout');
-  const directory = path.resolve(config.root, git('rev-parse', '--git-path', 'repo-kit-verification'));
+  const directory = path.resolve(config.root, git('rev-parse', '--git-path', 'package-kit-verification'));
   fs.mkdirSync(directory, { recursive: true });
   const run = fs.mkdtempSync(path.join(directory, 'run-'));
   const logs = new Map(selected.map((check, index) => {
@@ -152,5 +153,5 @@ export async function main(args) {
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await main(process.argv.slice(2)); }
-  catch (error) { console.error(`repo-kit-lane: ${error.message}`); process.exitCode = 1; }
+  catch (error) { console.error(`package-kit-lane: ${error.message}`); process.exitCode = 1; }
 }

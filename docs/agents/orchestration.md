@@ -1,6 +1,6 @@
 # Orchestration
 
-No lane adapter is configured for repo-kit itself. Use Mastack's orchestration
+No lane adapter is configured for package-kit itself. Use Mastack's orchestration
 process with Git worktrees, task branches based on origin/main and GitHub issues.
 Worktrees live under `.claude/worktrees/`; do not modify another task's checkout.
 A lane's lifecycle and Slotfather execution leases are separate. Verification

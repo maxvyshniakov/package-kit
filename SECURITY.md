@@ -4,7 +4,7 @@
 
 Report it privately through GitHub: this repository's **Security** tab → **Report a vulnerability**. Please do not
 open a public issue for a vulnerability. Include the affected version or commit, what an attacker controls, and the
-smallest reproduction you have. Repo-Kit is maintained by one person in spare time; expect an acknowledgement within
+smallest reproduction you have. Package-Kit is maintained by one person in spare time; expect an acknowledgement within
 about a week, and a fix in the next release when the report holds.
 
 Only the latest release is supported.
@@ -18,7 +18,7 @@ Only the latest release is supported.
 ## What is not
 
 Verification runs the consumer's own configured commands with the invoking account's privileges. It is not a
-sandbox, and a repository's `repo-kit.config.mjs`, scripts and dependencies are trusted code.
+sandbox, and a repository's `package-kit.config.mjs`, scripts and dependencies are trusted code.
 
 ## Running the workflows safely
 

@@ -1,14 +1,14 @@
 # Reusable: builds Storybook and publishes it to the caller's Cloudflare host.
 # The caller decides when (main pushes and dispatches) and after which jobs, and
-# passes their results; `repo-kit ci-gate` then follows release.gate in
-# repo-kit.config.mjs: under "local" the checks are advisory and the deploy runs
+# passes their results; `package-kit ci-gate` then follows release.gate in
+# package-kit.config.mjs: under "local" the checks are advisory and the deploy runs
 # whatever they concluded; under "ci" it deploys only when every one passed:
 #
 #   jobs:
 #     deploy:
 #       needs: [check, browser]
 #       if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-#       uses: maxvyshniakov/repo-kit/.github/workflows/deploy-storybook.yml@v0.10.0
+#       uses: maxvyshniakov/package-kit/.github/workflows/deploy-storybook.yml@v0.10.0
 #       with:
 #         url: https://sid-kit.maxvyshniakov.com
 #         needs: ${{ toJSON(needs) }}
@@ -32,7 +32,7 @@ on:
         type: string
         default: storybook
       needs:
-        description: The caller's toJSON(needs); repo-kit ci-gate deploys after a failed one only under release.gate "local".
+        description: The caller's toJSON(needs); package-kit ci-gate deploys after a failed one only under release.gate "local".
         type: string
         default: "{}"
       runner:
@@ -86,26 +86,26 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.10.0
+      - uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0
       # release.gate "local": the checks are advisory, deploy anyway; "ci": only
       # after every needed job passed. Writes run=true|false.
       - id: gate
-        run: node_modules/.bin/repo-kit ci-gate
+        run: node_modules/.bin/package-kit ci-gate
         env:
-          REPO_KIT_NEEDS: ${{ inputs.needs }}
+          PACKAGE_KIT_NEEDS: ${{ inputs.needs }}
       # The builds are heavy: they run under one lease, like every heavy job here.
       - if: steps.gate.outputs.run == 'true'
-        run: node_modules/.bin/repo-kit heavy "$SLOTS" sh -c 'bun run build && bun run storybook:build'
+        run: node_modules/.bin/package-kit heavy "$SLOTS" sh -c 'bun run build && bun run storybook:build'
         env:
           SLOTS: ${{ inputs.slots }}
-          REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
+          PACKAGE_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
       # It installs and builds the Storybooks of the retained releases: heavy too.
       - if: steps.gate.outputs.run == 'true'
-        run: node_modules/.bin/repo-kit heavy "$SLOTS" bun run storybook:prepare-deploy
+        run: node_modules/.bin/package-kit heavy "$SLOTS" bun run storybook:prepare-deploy
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SLOTS: ${{ inputs.slots }}
-          REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
+          PACKAGE_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
       - if: steps.gate.outputs.run == 'true'
         run: bun run storybook:deploy
         env:

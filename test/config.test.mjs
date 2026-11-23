@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { CONFIG_KEYS, configIssues, loadConfig, NOTIFY_KEYS, PUBLISH_ACCESS, PUBLISH_REGISTRIES, REMOVED_KEYS, STEP_KEYS, validateConfig, withDefaults } from "../src/config.mjs";
+import { CONFIG_FILE, CONFIG_KEYS, configIssues, findRoot, LEGACY_CONFIG_FILE, LegacyConfigError, legacyEnvironmentWarnings, loadConfig, NOTIFY_KEYS, PUBLISH_ACCESS, PUBLISH_REGISTRIES, REMOVED_KEYS, STEP_KEYS, validateConfig, withDefaults } from "../src/config.mjs";
 import { REGISTRIES } from "../src/registry.mjs";
 import { normalizeSteps, verifySteps } from "../src/verify.mjs";
 import { kitRoot, tempRepository } from "./fixtures.mjs";
@@ -12,7 +12,7 @@ const stub = () => [];
 const notify = [{ repository: "maxvyshniakov/data-grid", workflow: "update-catalog-dependencies.yml", ref: "main" }];
 const inert = ["README.md", "AGENTS.md", "GLOSSARY.md", "LICENSE", ".gitignore", ".gitattributes"];
 
-// The shapes of the consumers' repo-kit.config.mjs files (2026-11-23), every
+// The shapes of the consumers' package-kit.config.mjs files (2026-11-23), every
 // key they set, with their functions stubbed.
 const CONSUMERS = {
   "data-grid": {
@@ -20,7 +20,7 @@ const CONSUMERS = {
       slots: 2,
       workerMemory: 1.75,
       inert: [...inert, ".lanefather.toml", "docs/agents/**"],
-      runner: ["repo-kit.config.mjs", "scripts/repo-kit-browser-steps.mjs"],
+      runner: ["package-kit.config.mjs", "scripts/package-kit-browser-steps.mjs"],
       canary: ["verify:script%20tests", "verify:kit"],
       smoke: ({ plan }) => ["verify:lint", ...plan.checks.map(row => row.id)],
       steps: ({ release }) => [
@@ -42,7 +42,7 @@ const CONSUMERS = {
     verify: {
       slots: 3,
       inert: [...inert, ".lanefather.toml", "docs/agents/**"],
-      runner: ["repo-kit.config.mjs"],
+      runner: ["package-kit.config.mjs"],
       canary: ["verify:script%20tests", "verify:kit"],
       smoke: ({ plan }) => ["verify:lint", "verify:test%20hygiene", ...plan.checks.map(row => row.id)],
       steps: ({ release }) => [
@@ -111,10 +111,46 @@ for (const [name, config] of Object.entries(CONSUMERS)) {
   });
 }
 
-test("repo-kit's own config passes validation", async () => {
+test("package-kit's own config passes validation", async () => {
   const config = await loadConfig(kitRoot);
   assert.equal(config.root, kitRoot);
   assert.ok(verifySteps(config).length);
+});
+
+test("package-kit publishes itself to npmjs.org, publicly, with no publishConfig to send it elsewhere", async () => {
+  const { default: own } = await import("../package-kit.config.mjs");
+  assert.deepEqual(own.publish, { registry: "npm", access: "public" });
+  const manifest = JSON.parse(fs.readFileSync(path.join(kitRoot, "package.json"), "utf8"));
+  assert.equal(manifest.name, "@maxvyshniakov/package-kit");
+  assert.equal(manifest.publishConfig, undefined);
+  assert.deepEqual(Object.keys(manifest.bin), ["package-kit", "package-kit-lane"]);
+  // Consumers keep GitHub Packages unless they opt in.
+  assert.equal(withDefaults({}).publish.registry, "github");
+});
+
+test("a repository with only the pre-rename repo-kit.config.mjs fails with what to rename", async () => {
+  assert.equal(CONFIG_FILE, "package-kit.config.mjs");
+  assert.equal(LEGACY_CONFIG_FILE, "repo-kit.config.mjs");
+  const legacy = tempRepository({ "repo-kit.config.mjs": "export default {};\n", "nested/file.txt": "" });
+  try {
+    const expected = /repo-kit\.config\.mjs: @maxvyshniakov\/repo-kit is now @maxvyshniakov\/package-kit: rename repo-kit\.config\.mjs to package-kit\.config\.mjs, and change its imports of "@maxvyshniakov\/repo-kit" to "@maxvyshniakov\/package-kit"/;
+    assert.throws(() => findRoot(path.join(legacy.root, "nested")), error => error instanceof LegacyConfigError && expected.test(error.message));
+    await assert.rejects(loadConfig(legacy.root), expected);
+    // Once renamed, the new file wins even while the old one is still there.
+    fs.writeFileSync(path.join(legacy.root, CONFIG_FILE), "export default {};\n");
+    assert.equal(findRoot(path.join(legacy.root, "nested")), legacy.root);
+    assert.equal((await loadConfig(legacy.root)).root, legacy.root);
+  } finally {
+    legacy.cleanup();
+  }
+});
+
+test("a pre-rename REPO_KIT_* variable is named with its PACKAGE_KIT_* replacement, and Lanefather's slot_env for slot variables", () => {
+  assert.deepEqual(legacyEnvironmentWarnings({ PATH: "/bin", PACKAGE_KIT_SLOT_WAIT: "5" }), []);
+  assert.deepEqual(legacyEnvironmentWarnings({ REPO_KIT_SLOT_LABEL: "lane", REPO_KIT_FORCE: "1" }), [
+    "package-kit: REPO_KIT_FORCE is ignored since the rename from repo-kit; set PACKAGE_KIT_FORCE",
+    'package-kit: REPO_KIT_SLOT_LABEL is ignored since the rename from repo-kit; set PACKAGE_KIT_SLOT_LABEL; in .lanefather.toml set slot_env = "PACKAGE_KIT_SLOT"',
+  ]);
 });
 
 test("steps, smoke and browser may be functions, arrays or absent", () => {
@@ -152,7 +188,7 @@ test("sections and notify targets must be objects", () => {
   assert.deepEqual(configIssues({ prePush: [] }), ["prePush must be an object, got an array"]);
   assert.deepEqual(configIssues({ publish: { notify: {} } }), ["publish.notify must be an array of { repository, workflow, ref }"]);
   assert.deepEqual(configIssues({ publish: { notify: ["x"] } }), ["publish.notify[0] must be an object { repository, workflow, ref }"]);
-  assert.deepEqual(configIssues(null), ["repo-kit.config.mjs must export an object, got null"]);
+  assert.deepEqual(configIssues(null), ["package-kit.config.mjs must export an object, got null"]);
 });
 
 test("publish.registry names GitHub Packages, npmjs.org or both, and publish.access npm's access", () => {
@@ -175,13 +211,13 @@ test("publish.registry names GitHub Packages, npmjs.org or both, and publish.acc
 
 test("validateConfig throws every issue at once", () => {
   assert.throws(() => validateConfig({ verify: { slot: 1 }, adopt: {} }), error => {
-    assert.match(error.message, /^repo-kit\.config\.mjs:\n {2}unknown key verify\.slot;.*\n {2}adopt: repo-kit adopt was removed/);
+    assert.match(error.message, /^package-kit\.config\.mjs:\n {2}unknown key verify\.slot;.*\n {2}adopt: package-kit adopt was removed/);
     return true;
   });
 });
 
 test("loadConfig rejects an unknown key before any command runs", async () => {
-  const repository = tempRepository({ "repo-kit.config.mjs": "export default { verify: { stepTimout: 5 } };\n" });
+  const repository = tempRepository({ "package-kit.config.mjs": "export default { verify: { stepTimout: 5 } };\n" });
   try {
     await assert.rejects(loadConfig(repository.root), /unknown key verify\.stepTimout; did you mean verify\.stepTimeout\?/);
   } finally {
@@ -202,11 +238,11 @@ test("CONFIG_KEYS and STEP_KEYS match the keys src/ reads", () => {
     .filter(file => file.endsWith(".mjs"))
     .map(file => path.join("src", file));
   const sources = Object.fromEntries(files.map(file => [file, fs.readFileSync(path.join(kitRoot, file), "utf8")]));
-  // Locals named config that are not repo-kit.config.mjs: file-budget's allowlist file.
+  // Locals named config that are not package-kit.config.mjs: file-budget's allowlist file.
   const notRepoConfig = { "src/file-budget.mjs": ["version", "files"] };
   const sections = Object.keys(CONFIG_KEYS);
   for (const [file, text] of Object.entries(sources)) {
-    // File names such as repo-kit.config.mjs are not reads.
+    // File names such as package-kit.config.mjs are not reads.
     for (const [, section, key] of text.replace(/[\w./-]+\.mjs\b/g, "").matchAll(/\bconfig\??\.(\w+)(?:\??\.(\w+))?/g)) {
       if (section === "root" || notRepoConfig[file]?.includes(section)) continue;
       assert.ok(sections.includes(section), `${file} reads config.${section}, which CONFIG_KEYS lacks`);

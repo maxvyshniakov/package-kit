@@ -2,9 +2,9 @@
 // pushed. CI's check job and the pre-push hook run exactly this, so project
 // skills and instructions can name the command instead of listing steps.
 //
-//   repo-kit verify                 the steps of repo-kit.config.mjs verify.steps
-//   repo-kit verify --release       the same with release: true (main: no unreleased entries)
-//   repo-kit verify --browser       verify.browser, the slower browser checks
+//   package-kit verify                 the steps of package-kit.config.mjs verify.steps
+//   package-kit verify --release       the same with release: true (main: no unreleased entries)
+//   package-kit verify --browser       verify.browser, the slower browser checks
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -92,7 +92,7 @@ export function cleanCheckoutTree(root, { env = process.env } = {}) {
 /** Environment variables that override local sources and must bypass verified-tree reuse. */
 export const REUSE_BYPASS_ENV_VARS = [
   "SID_KIT_SOURCE",
-  "REPO_KIT_SOURCE",
+  "PACKAGE_KIT_SOURCE",
   "INLINE_MEASURE_SOURCE",
   "TEXT_TRUNCATE_SOURCE",
 ];
@@ -189,9 +189,9 @@ export async function runVerify(config, {
   const { workerMemory } = config.verify;
   const workers = unitTestWorkers(cores, memory, workerMemory);
   const steps = sizeSteps(baseSteps, { workers, workerMemory });
-  const reuseEnabled = reuse && env.REPO_KIT_NO_REUSE !== "1" && !hasReuseBypassEnv(env);
+  const reuseEnabled = reuse && env.PACKAGE_KIT_NO_REUSE !== "1" && !hasReuseBypassEnv(env);
   const checkout = reuseEnabled ? cleanCheckoutTree(config.root, { env }) : null;
-  const cacheDir = checkout ? (reuseDir ?? path.join(checkout.gitCommonDir, "repo-kit-verified-tree")) : null;
+  const cacheDir = checkout ? (reuseDir ?? path.join(checkout.gitCommonDir, "package-kit-verified-tree")) : null;
   const platform = hostPlatform();
   const cachedKeys = checkout ? readTreeCache(cacheDir, checkout.tree, platform) : new Set();
   const reused = checkout ? reusableSteps(steps, cachedKeys, { release }) : new Set();

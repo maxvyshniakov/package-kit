@@ -1,4 +1,4 @@
-// Git pre-push hook (.githooks/pre-push, written by `repo-kit hooks sync`).
+// Git pre-push hook (.githooks/pre-push, written by `package-kit hooks sync`).
 // Runs `bun run verify` on each commit being pushed, in a clean temporary
 // worktree, so uncommitted files cannot make it pass. A push to main runs
 // `verify --release`. Skip once with `git push --no-verify`.
@@ -24,8 +24,8 @@ const RELEASE_BRANCHES = ["main"];
 
 // Commits that passed, one "<sha>[ release]" per line in the common Git
 // directory. Earlier copies of this hook used the other names.
-export const VERIFIED_RECORD = "repo-kit-verified";
-const LEGACY_RECORDS = ["sid-kit-verified", "verified-commits"];
+export const VERIFIED_RECORD = "package-kit-verified";
+const LEGACY_RECORDS = ["sid-kit-verified", "verified-commits", "repo-kit-verified"];
 
 const verifiedRecord = gitDir => passedRecord(gitDir, VERIFIED_RECORD, { legacy: LEGACY_RECORDS });
 
@@ -113,7 +113,7 @@ export function runPrePush({ stdin = fs.readFileSync(0, "utf8"), releaseBranches
         }
         const run = (file, args) => !signals.stopped && spawnSync(file, args, { cwd: worktree, stdio: "inherit", env }).status === 0 && !signals.stopped;
         return run("bun", ["install", "--frozen-lockfile"]) && run(...command);
-      }, { prefix: "repo-kit-pre-push-", env });
+      }, { prefix: "package-kit-pre-push-", env });
       if (signals.stopped) {
         console.error(`\npre-push: ${signals.stopped}; nothing was pushed.`);
         return signals.exitCode();

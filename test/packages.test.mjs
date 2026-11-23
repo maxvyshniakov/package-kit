@@ -36,7 +36,7 @@ const capture = fn => {
 test("releasedPackages hides npm workspace and root package differences behind one interface", () => {
   const ws = tempRepository(workspaceFiles());
   const rootNpm = tempRepository(rootPackageFiles());
-  const none = tempRepository({ "repo-kit.config.mjs": "export default {};\n" });
+  const none = tempRepository({ "package-kit.config.mjs": "export default {};\n" });
   try {
     const [wsPkg] = releasedPackages(ws.root);
     assert.equal(wsPkg.workspace, true);

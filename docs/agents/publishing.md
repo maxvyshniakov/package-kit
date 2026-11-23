@@ -19,16 +19,17 @@ remove only worktrees belonging to completed, integrated work.
 ## CI
 
 `check.yml` (Library checks) runs on main and pull requests. Follow
-`gh run list --repo maxvyshniakov/repo-kit --commit <sha>` and
-`gh run watch <run-id> --repo maxvyshniakov/repo-kit --exit-status` to completion.
+`gh run list --repo maxvyshniakov/package-kit --commit <sha>` and
+`gh run watch <run-id> --repo maxvyshniakov/package-kit --exit-status` to completion.
 This repository's checks use GitHub-hosted Ubuntu runners; consumer reusable workflows have their own runner configuration.
 
 ## Release
 
 Only on an explicit release request: follow [README versioning](../../README.md#versioning).
-Cut the version, push main, run `bun run repo-kit release-gate origin/main`, then
-`bun run release:publish` from that exact clean revision. Publication to GitHub
-Packages and tags is separate from an ordinary push. Update consumer pins only
+Cut the version and push main, then run
+`gh workflow run release-npm.yml --repo maxvyshniakov/package-kit --ref main`: it verifies with
+`--release`, publishes to npmjs.org (trusted publishing, provenance) and tags. Publication and
+tags are separate from an ordinary push. Update consumer pins only
 within their authorized tasks. Repository and package visibility change only by explicit owner decision.
 
 ## After push

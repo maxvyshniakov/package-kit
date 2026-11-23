@@ -1,8 +1,8 @@
 # Issue tracker
 
-GitHub Issues: `maxvyshniakov/repo-kit`. Use English in tracker artifacts.
-Read with `gh issue view <n> --repo maxvyshniakov/repo-kit`; list with
-`gh issue list --repo maxvyshniakov/repo-kit`. Use the same explicit repository
+GitHub Issues: `maxvyshniakov/package-kit`. Use English in tracker artifacts.
+Read with `gh issue view <n> --repo maxvyshniakov/package-kit`; list with
+`gh issue list --repo maxvyshniakov/package-kit`. Use the same explicit repository
 for create, comment and close. Inspect available labels before applying one;
 there are no required custom workflow states.
 

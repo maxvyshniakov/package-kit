@@ -1,4 +1,4 @@
-// repo-kit serve <dir> [--port N] [--host 127.0.0.1]
+// package-kit serve <dir> [--port N] [--host 127.0.0.1]
 //
 // Dependency-free HTTP/1.1 Keep-Alive static preview server with a high socket
 // backlog, so cold browser loads behind an HTTP/2 reverse proxy (e.g. Tailscale
@@ -33,7 +33,7 @@ export const MIME_TYPES = Object.freeze({
   ".txt": "text/plain; charset=utf-8",
 });
 
-export const USAGE = `Usage: repo-kit serve <dir> [--port <number>] [--host <address>]`;
+export const USAGE = `Usage: package-kit serve <dir> [--port <number>] [--host <address>]`;
 
 /** Content-Type header for a file path or extension. */
 export function mimeTypeFor(filePath) {
@@ -58,7 +58,7 @@ export function cacheControlFor(urlPathname, filePath = urlPathname) {
 }
 
 /**
- * Parse `repo-kit serve <dir> [--port N] [--host 127.0.0.1]`.
+ * Parse `package-kit serve <dir> [--port N] [--host 127.0.0.1]`.
  */
 export function parseServeArgs(argv, { cwd = process.cwd() } = {}) {
   let dir;
@@ -338,7 +338,7 @@ export async function startStaticServer({
 }
 
 /**
- * CLI entrypoint for `repo-kit serve <dir> [--port N] [--host 127.0.0.1]`.
+ * CLI entrypoint for `package-kit serve <dir> [--port N] [--host 127.0.0.1]`.
  */
 export async function runServe(argv, {
   cwd = process.cwd(),
@@ -351,7 +351,7 @@ export async function runServe(argv, {
     return 0;
   }
   const instance = await startStaticServer(parsed);
-  log(`repo-kit serve: ${instance.dir} at ${instance.url}`);
+  log(`package-kit serve: ${instance.dir} at ${instance.url}`);
 
   await new Promise(resolve => {
     const shutdown = () => {

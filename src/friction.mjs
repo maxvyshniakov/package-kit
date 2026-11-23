@@ -1,7 +1,7 @@
 // The agent friction journal: one local, append-only JSONL file of moments an
 // agent misread or misused a package (a lint finding beyond the baseline, a type
 // error on the package's types, an owner's correction, a vendored copy patched).
-// Writers: `repo-kit friction log`, sid-kit-lint, the mastack hook and scanners.
+// Writers: `package-kit friction log`, sid-kit-lint, the mastack hook and scanners.
 // `report` ranks it; `export` writes a redacted bundle a person can send.
 // Nothing here opens a network connection. See docs/reference.md#friction-journal.
 import crypto from "node:crypto";
@@ -107,6 +107,7 @@ export function buildEvent(fields, { cwd = process.cwd(), env = process.env, now
     rule: text(fields.rule),
     detail: (text(fields.detail) ?? "").slice(0, DETAIL_LIMIT),
     session: text(fields.session) ?? sessionId(env),
+    // The journal's writer name predates the package-kit rename; readers group by it.
     source: text(fields.source) ?? "repo-kit",
     why: text(fields.why),
     file: text(fields.file),
@@ -315,11 +316,11 @@ export function exportBundle(all, options = {}) {
 }
 
 const USAGE = `Usage:
-  repo-kit friction log --package <npm name> --kind <kind> [--component <export>] [--rule <rule>]
+  package-kit friction log --package <npm name> --kind <kind> [--component <export>] [--rule <rule>]
                         [--detail <text>] [--why <text>] [--file <path>] [--project <name>] [--session <id>]
                         [--source <writer>] [--fingerprint <key>]
-  repo-kit friction report [--since 30d|YYYY-MM-DD] [--until ...] [--project P] [--package P] [--kind K] [--top N] [--json]
-  repo-kit friction export [--since ...] [--until ...] [--package P] [--notes] [--out FILE]
+  package-kit friction report [--since 30d|YYYY-MM-DD] [--until ...] [--project P] [--package P] [--kind K] [--top N] [--json]
+  package-kit friction export [--since ...] [--until ...] [--package P] [--notes] [--out FILE]
 
 Kinds: ${FRICTION_KINDS.join(", ")}.
 Journal: FRICTION_JOURNAL, else $XDG_STATE_HOME/friction/events.jsonl (~/.local/state/friction/events.jsonl);
@@ -350,7 +351,7 @@ export function runFriction(args, { env = process.env, cwd = process.cwd(), now 
   try {
     flags = parseFlags(rest);
   } catch (error) {
-    console.error(`repo-kit friction: ${error.message}\n${USAGE}`);
+    console.error(`package-kit friction: ${error.message}\n${USAGE}`);
     return 1;
   }
   const journalEnv = flags.journal ? { ...env, FRICTION_JOURNAL: flags.journal } : env;
@@ -367,7 +368,7 @@ export function runFriction(args, { env = process.env, cwd = process.cwd(), now 
     }
     const file = journalPath(journalEnv);
     if (!file) {
-      console.error("repo-kit friction: the journal is off (FRICTION_JOURNAL=off)");
+      console.error("package-kit friction: the journal is off (FRICTION_JOURNAL=off)");
       return 1;
     }
     const { events, skipped } = readEvents(file);
@@ -387,7 +388,7 @@ export function runFriction(args, { env = process.env, cwd = process.cwd(), now 
       return 0;
     }
   } catch (error) {
-    console.error(`repo-kit friction: ${error.message}`);
+    console.error(`package-kit friction: ${error.message}`);
     return 1;
   }
   console.error(USAGE);

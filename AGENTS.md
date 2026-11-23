@@ -1,6 +1,6 @@
-# repo-kit
+# package-kit
 
-This repository owns `@maxvyshniakov/repo-kit`. It holds the shared verify, pre-push, release and publish tooling,
+This repository owns `@maxvyshniakov/package-kit`. It holds the shared verify, pre-push, release and publish tooling,
 plus the reusable workflows of the Sid-Kit, Data Grid, Inline Measure and Text Truncate repositories.
 [README.md](README.md) is the reference for its commands, config, workflows and release order.
 

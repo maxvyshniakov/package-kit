@@ -1,8 +1,26 @@
-# @maxvyshniakov/repo-kit Changelog
+# @maxvyshniakov/package-kit Changelog
 
 Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
+
+### Breaking
+
+- `@maxvyshniakov/repo-kit` is now `@maxvyshniakov/package-kit`, published to npmjs.org with provenance instead of GitHub Packages, from the renamed repository `maxvyshniakov/package-kit` (Refs #23). To move a consumer:
+  - Depend on `@maxvyshniakov/package-kit` instead of `@maxvyshniakov/repo-kit`, and import `@maxvyshniakov/package-kit` (and its `/changelog`, `/plan`, `/publish`, `/release`, `/serve`, `/shoot`, `/packed-consumer`, `/safari-background`, `/friction-contract.json` exports).
+  - The commands are `package-kit` and `package-kit-lane` (were `repo-kit` and `repo-kit-lane`); a `package.json` script named `repo-kit` becomes `package-kit`.
+  - Rename `repo-kit.config.mjs` to `package-kit.config.mjs`. A repository that has only `repo-kit.config.mjs` fails every command that reads the config, saying what to rename.
+  - Every `REPO_KIT_*` variable is now `PACKAGE_KIT_*` (`PACKAGE_KIT_SLOT_WAIT`, `PACKAGE_KIT_VERIFY_SLOTS`, `PACKAGE_KIT_CHECKS`, ...). `package-kit` and `package-kit-lane` name each `REPO_KIT_*` variable still set on stderr, with its replacement. With Lanefather, set `slot_env = "PACKAGE_KIT_SLOT"` in `.lanefather.toml`.
+  - Workflows call `maxvyshniakov/package-kit/.github/workflows/...` and `maxvyshniakov/package-kit/actions/...`; `package-kit check` fails until they do.
+  - Run `package-kit hooks sync` and commit `.githooks`: the managed hooks now run `node_modules/@maxvyshniakov/package-kit`. Sync replaces hooks the old package wrote, `commit-msg` included.
+  - `release-gate` keeps its record in `.git/package-kit-gate/` (was `.git/repo-kit-gate/`), temporary files and caches take the `package-kit` name, and the managed pre-push hook records passed commits in `package-kit-verified`. Commits recorded under the old names still count as passed.
+  `publish.registry` still defaults to `"github"`: consumers keep publishing to GitHub Packages unless they set `"npm"` or `["github", "npm"]`. The friction journal keeps `source: "repo-kit"` for entries `package-kit friction log` writes, so readers see one writer.
+  No transition period: the package name and its commands are what consumers install and call, and npmjs.org gets a new package rather than a new version of the old one, so each consumer switches once when it moves its pin. `@maxvyshniakov/repo-kit` 0.10.0 and older stay on GitHub Packages, so pinned consumers keep working until they move.
+
+### Added
+
+- `.github/workflows/release-npm.yml` publishes package-kit itself to npmjs.org: a `check` job runs `verify --release`, then a `publish` job with `contents: write` and `id-token: write` runs `./actions/npm-publish` from the same commit (Refs #23).
+- `actions/npm-publish` takes `kit`, the package-kit executable that leases the publication (default `node_modules/.bin/package-kit`).
 
 ## 0.10.0 - 2026-11-23
 

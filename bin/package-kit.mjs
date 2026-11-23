@@ -9,7 +9,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
     const code = await main(process.argv.slice(2));
     if (code !== undefined) process.exitCode = code;
   } catch (error) {
-    console.error(`repo-kit: ${error.message}`);
+    console.error(`package-kit: ${error.message}`);
     process.exitCode = 1;
   }
 }

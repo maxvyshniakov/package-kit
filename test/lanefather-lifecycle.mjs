@@ -9,7 +9,7 @@ import path from 'node:path';
 import { kitRoot, tempRepository } from './fixtures.mjs';
 import { syncHooks } from '../src/hooks.mjs';
 
-const archive = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-lifecycle-'));
+const archive = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lifecycle-'));
 let repo, server;
 const run = (file, args, cwd, env) => new Promise((resolve, reject) => {
   const child = spawn(file, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -26,12 +26,12 @@ try {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   repo = tempRepository({
     'package.json': { name: 'generic-lane-consumer', type: 'module', devDependencies: {
-      '@maxvyshniakov/repo-kit': `http://127.0.0.1:${server.address().port}/repo-kit.tgz`,
+      '@maxvyshniakov/package-kit': `http://127.0.0.1:${server.address().port}/package-kit.tgz`,
     } },
     '.gitignore': 'node_modules/\n.claude/\n',
     'README.md': 'original fixture\n',
-    '.lanefather.toml': `project="arbitrary-consumer"\nstate_dir=${JSON.stringify(path.join(archive, 'lanes'))}\n[checks]\nverify=".githooks/lane-check"\nslot_env="REPO_KIT_SLOT"\n`,
-    'repo-kit.config.mjs': `export default {verify:{steps:[{name:'arbitrary command',command:['-e',"console.log('validated')"]}]}};`,
+    '.lanefather.toml': `project="arbitrary-consumer"\nstate_dir=${JSON.stringify(path.join(archive, 'lanes'))}\n[checks]\nverify=".githooks/lane-check"\nslot_env="PACKAGE_KIT_SLOT"\n`,
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'arbitrary command',command:['-e',"console.log('validated')"]}]}};`,
   }, { git: true });
   const env = { ...repo.env };
   for (const key of Object.keys(env)) if (/^(LANEFATHER_|STRAYLIGHT_)/.test(key)) delete env[key];

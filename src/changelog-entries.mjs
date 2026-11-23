@@ -1,14 +1,14 @@
 // The changelog-entry guard: a commit that changes a package's shipped paths
-// (changelog.paths in repo-kit.config.mjs) adds, changes or removes a line under
+// (changelog.paths in package-kit.config.mjs) adds, changes or removes a line under
 // "## Unreleased" in that package's CHANGELOG.md, or carries the trailer
 // "Changelog: none", optionally with a reason: "Changelog: none (tests only)".
 // One such trailer covers the whole commit, every package it changes.
 // Merge commits, and commits that cut the package's release (a new newest
-// changelog release that the manifest's version names, as `repo-kit release`
+// changelog release that the manifest's version names, as `package-kit release`
 // writes), are exempt.
 //
-//   repo-kit check-changelog-entries <base>..<head>   every commit of a range (verify, CI)
-//   repo-kit commit-msg <message file>                the commit being made (.githooks/commit-msg)
+//   package-kit check-changelog-entries <base>..<head>   every commit of a range (verify, CI)
+//   package-kit commit-msg <message file>                the commit being made (.githooks/commit-msg)
 //
 // Without changelog.paths both do nothing.
 import { spawnSync } from "node:child_process";
@@ -217,7 +217,7 @@ export function rangeIssues(root, range, rules) {
 export function runCheckChangelogEntries(config, args) {
   const range = args.filter(arg => arg !== "--");
   if (!range.length) {
-    console.error("Usage: repo-kit check-changelog-entries <base>..<head>");
+    console.error("Usage: package-kit check-changelog-entries <base>..<head>");
     return 2;
   }
   const rules = configuredRules(config);
@@ -309,7 +309,7 @@ export function stagedIssues(root, message, rules, { amend = amending() } = {}) 
 
 export function runCommitMsg(config, [messageFile] = []) {
   if (!messageFile) {
-    console.error("Usage: repo-kit commit-msg <message file>");
+    console.error("Usage: package-kit commit-msg <message file>");
     return 2;
   }
   const rules = configuredRules(config);

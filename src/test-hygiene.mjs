@@ -1,4 +1,4 @@
-// `repo-kit test-hygiene`: shrink-only rules over a repository's test files.
+// `package-kit test-hygiene`: shrink-only rules over a repository's test files.
 //
 //   fixed-sleep    a fixed wait: waitForTimeout(<n>), a setTimeout(resolve, <n ≥ 50>) promise,
 //                  sleep(<n ≥ 50 ms>), time.sleep(<n ≥ 0.2>), Thread.sleep, usleep, Task.sleep,
@@ -19,7 +19,7 @@
 // gain findings, a new file may not have any, and a count that dropped must be
 // lowered in the baseline (`--update`), so the counts only shrink. Compared
 // with the baseline committed at HEAD, no entry may rise. `--init` writes the
-// first baseline. Without a repo-kit.config.mjs (a Python repository, say) the
+// first baseline. Without a package-kit.config.mjs (a Python repository, say) the
 // defaults apply.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -361,13 +361,13 @@ export function compare(current, baseline, committed = null, existing = null) {
 const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 
 /**
- * The commit whose baseline this one may not exceed: REPO_KIT_HYGIENE_BASE, or
+ * The commit whose baseline this one may not exceed: PACKAGE_KIT_HYGIENE_BASE, or
  * where HEAD left origin's default branch; on that branch itself (a main push
  * in CI, the pre-push check of main) HEAD's parent. HEAD when none is known.
  */
 export function baseCommit(root, env = process.env) {
   const tryGit = args => { try { return git(root, args); } catch { return null; } };
-  if (env.REPO_KIT_HYGIENE_BASE) return tryGit(["rev-parse", "--verify", `${env.REPO_KIT_HYGIENE_BASE}^{commit}`]);
+  if (env.PACKAGE_KIT_HYGIENE_BASE) return tryGit(["rev-parse", "--verify", `${env.PACKAGE_KIT_HYGIENE_BASE}^{commit}`]);
   const head = tryGit(["rev-parse", "--verify", "HEAD"]);
   if (!head) return null;
   for (const ref of ["origin/HEAD", "origin/main"]) {
@@ -417,7 +417,7 @@ export function runTestHygiene({ root, config = {}, args = [], env = process.env
     writeBaseline(baselineFile, lowered);
     for (const { rule, file, count, limit } of stale) print(`test-hygiene: lowered ${rule} ${file} ${limit} -> ${count}`);
   } else if (stale.length) {
-    for (const { rule, file, count, limit } of stale) printError(`test-hygiene: ${rule} in ${file} went down to ${count} (baseline ${limit}); run repo-kit test-hygiene --update to lower the baseline`);
+    for (const { rule, file, count, limit } of stale) printError(`test-hygiene: ${rule} in ${file} went down to ${count} (baseline ${limit}); run package-kit test-hygiene --update to lower the baseline`);
     failed = true;
   }
   for (const { rule, file, count, limit, raised } of problems) {

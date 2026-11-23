@@ -13,7 +13,7 @@ const adapter = path.join(kitRoot, 'src/lanefather.mjs');
 test('the adapter plans arbitrary configured checks without executing them', () => {
   const repo = tempRepository({
     'package.json': { name: 'unrelated-project', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[
+    'package-kit.config.mjs': `export default {verify:{steps:[
       {name:'compile widgets',command:['-e',"require('fs').writeFileSync('ran','yes')"]},
       {name:'validate, records',command:['-e','process.exit(0)'],needs:['compile widgets']}
     ],browser:[{name:'inspect pixels',command:['-e','process.exit(0)']}]}};`,
@@ -41,7 +41,7 @@ test('the adapter plans arbitrary configured checks without executing them', () 
 test('selected checks run their real dependencies and report failure and blocked work', () => {
   const repo = tempRepository({
     'package.json': { name: 'another-project', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[
+    'package-kit.config.mjs': `export default {verify:{steps:[
       {name:'prepare',command:['-e',"console.log('prepared')"]},
       {name:'broken',command:['-e',"console.error('actual failure');process.exit(7)"],needs:['prepare']},
       {name:'later',command:['-e',"require('fs').writeFileSync('must-not-run','yes')"],needs:['broken']}
@@ -69,7 +69,7 @@ test('selected checks run their real dependencies and report failure and blocked
 test('a full run keeps browser work after validation and reports a committed tree', () => {
   const repo = tempRepository({
     'package.json': { name: 'opaque-fixture', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[
+    'package-kit.config.mjs': `export default {verify:{steps:[
       {name:'build',command:['-e',"require('fs').writeFileSync('result','valid')"]}
     ],browser:[{name:'build',command:['-e',"if(require('fs').readFileSync('result','utf8')!=='valid')process.exit(2)"]}]}};`,
     '.gitignore': 'result\n',
@@ -89,7 +89,7 @@ test('a successful command that changes committed inputs cannot produce green ev
   const repo = tempRepository({
     'package.json': { name: 'mutating-fixture', type: 'module' },
     'input.txt': 'original',
-    'repo-kit.config.mjs': `export default {verify:{steps:[{name:'mutate',command:['-e',"require('fs').writeFileSync('input.txt','changed')"]}]}};`,
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'mutate',command:['-e',"require('fs').writeFileSync('input.txt','changed')"]}]}};`,
   }, { git: true });
   try {
     const result = spawnSync(process.execPath, [adapter, '--jobs', '1'],
@@ -122,7 +122,7 @@ test('hooks sync supplies one shared verification entry for configured lane cons
 test('the managed entry installs a clean linked checkout before planning its own locked adapter', async () => {
   // A Bun folder dependency locks a path relative to the original checkout;
   // use a packed HTTP dependency, like the registry, to test relocated worktrees.
-  const archive = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-lane-pack-'));
+  const archive = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lane-pack-'));
   let repo, server, linked;
   const run = (command, args, cwd, env) => new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -139,10 +139,10 @@ test('the managed entry installs a clean linked checkout before planning its own
     server = http.createServer((request, response) => { response.setHeader('Content-Type', 'application/octet-stream'); response.end(tarball); });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     repo = tempRepository({
-      'package.json': { name: 'fresh-checkout-fixture', type: 'module', devDependencies: { '@maxvyshniakov/repo-kit': `http://127.0.0.1:${server.address().port}/repo-kit.tgz` } },
+      'package.json': { name: 'fresh-checkout-fixture', type: 'module', devDependencies: { '@maxvyshniakov/package-kit': `http://127.0.0.1:${server.address().port}/package-kit.tgz` } },
       '.gitignore': 'node_modules/\n.claude/\n',
       '.lanefather.toml': '[checks]\nverify=".githooks/lane-check"\n',
-      'repo-kit.config.mjs': "export default {verify:{steps:[{name:'probe',command:['-e',\"console.log('ran check')\"]}]}};",
+      'package-kit.config.mjs': "export default {verify:{steps:[{name:'probe',command:['-e',\"console.log('ran check')\"]}]}};",
     }, { git: true });
     linked = path.join(repo.root, '.claude/worktrees/fresh');
     await run('bun', ['install'], repo.root, repo.env);
@@ -154,7 +154,7 @@ test('the managed entry installs a clean linked checkout before planning its own
     assert.equal(fs.existsSync(path.join(linked, 'node_modules')), false);
     const result = await run(path.join(linked, '.githooks/lane-check'), ['--changed', '--base', base, '--plan', '--json'], linked, repo.env);
     assert.equal(JSON.parse(result.stdout).checks[0].id, 'verify:probe');
-    assert.ok(fs.existsSync(path.join(linked, 'node_modules/@maxvyshniakov/repo-kit/src/lanefather.mjs')));
+    assert.ok(fs.existsSync(path.join(linked, 'node_modules/@maxvyshniakov/package-kit/src/lanefather.mjs')));
     assert.equal(repo.git('-C', linked, 'status', '--porcelain'), '');
   } finally {
     if (repo) { if (linked && fs.existsSync(linked)) repo.git('worktree', 'remove', '--force', linked); repo.cleanup(); }
@@ -164,11 +164,11 @@ test('the managed entry installs a clean linked checkout before planning its own
 });
 
 test('the packaged command explains its contract without project configuration or a lease', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-lane-help-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lane-help-'));
   try {
     const result = spawnSync(process.execPath, [adapter, '--help'], { cwd: directory, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /repo-kit-lane.*--changed/);
+    assert.match(result.stdout, /package-kit-lane.*--changed/);
     assert.match(result.stdout, /--checks/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
@@ -176,7 +176,7 @@ test('the packaged command explains its contract without project configuration o
 test('cancellation never reports a zero-exiting interrupted step as passed', async () => {
   const repo = tempRepository({
     'package.json': { name: 'interrupted-project', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[{name:'waiting',command:['-e',"process.on('SIGTERM',()=>process.exit(0)); console.log('ready-for-cancel'); setInterval(()=>{},1000)"]}]}};`,
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'waiting',command:['-e',"process.on('SIGTERM',()=>process.exit(0)); console.log('ready-for-cancel'); setInterval(()=>{},1000)"]}]}};`,
   }, { git: true });
   let child;
   try {
@@ -202,7 +202,7 @@ test('ambient Git bindings cannot redirect verification to another repository', 
   const repo = tempRepository({
     'package.json': { name: 'binding-fixture', type: 'module' },
     'input.txt': 'before',
-    'repo-kit.config.mjs': "export default {verify:{steps:[{name:'probe',command:['-e','process.exit(0)']}]}};",
+    'package-kit.config.mjs': "export default {verify:{steps:[{name:'probe',command:['-e','process.exit(0)']}]}};",
   }, { git: true });
   try {
     const base = repo.git('rev-parse', 'HEAD');
@@ -217,7 +217,7 @@ test('ambient Git bindings cannot redirect verification to another repository', 
 test('unknown selections and invalid worker budgets are refused before running checks', () => {
   const repo = tempRepository({
     'package.json': { name: 'refusal-fixture', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[{name:'probe',command:['-e',"require('fs').writeFileSync('ran','yes')"]}]}};`,
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'probe',command:['-e',"require('fs').writeFileSync('ran','yes')"]}]}};`,
   }, { git: true });
   try {
     for (const args of [['--checks', 'missing'], ['--suites', 'missing'], ['--jobs=0'], ['--jobs=Infinity'],
@@ -232,7 +232,7 @@ test('unknown selections and invalid worker budgets are refused before running c
 test('a timed-out command has a failed report and blocks its dependants', () => {
   const repo = tempRepository({
     'package.json': { name: 'timeout-fixture', type: 'module' },
-    'repo-kit.config.mjs': `export default {verify:{steps:[
+    'package-kit.config.mjs': `export default {verify:{steps:[
       {name:'waiting',timeout:0.001,command:['-e','setInterval(()=>{},1000)']},
       {name:'later',needs:['waiting'],command:['-e','process.exit(0)']}
     ]}};`,
@@ -252,7 +252,7 @@ test('keep-going collects independent results after a failure and blocks only de
   const repo = tempRepository({
     'package.json': { name: 'collect-fixture', type: 'module' },
     '.gitignore': 'collected\n',
-    'repo-kit.config.mjs': `export default {verify:{steps:[
+    'package-kit.config.mjs': `export default {verify:{steps:[
       {name:'broken',command:['-e','process.exit(7)']},
       {name:'independent',command:['-e',"setTimeout(()=>require('fs').writeFileSync('collected','yes'),100)"]},
       {name:'dependent',needs:['broken'],command:['-e','process.exit(0)']}

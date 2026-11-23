@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// repo-kit <command> [args]; see README.md.
+// package-kit <command> [args]; see README.md.
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const USAGE = `Usage: repo-kit <command>
+const USAGE = `Usage: package-kit <command>
   verify [--release] [--browser] [--changed] [--base REF] [--plan] [--json] [--no-reuse] [--keep-going]
-                                   the repository's gate (repo-kit.config.mjs verify)
+                                   the repository's gate (package-kit.config.mjs verify)
   pre-push                         the pre-push hook: verify each pushed commit in a clean worktree
   heavy <slots|all> <command...>   run a command under a slotfather lease, when slotfather is installed
   shoot <story id filter...> [<storybook url>|--url=] [--theme=light,dark] [--width=1280,375]
@@ -13,8 +13,8 @@ const USAGE = `Usage: repo-kit <command>
                                    screenshot Storybook stories, under a lease of shoot.slots
   serve <dir> [--port N] [--host 127.0.0.1]
                                    HTTP/1.1 Keep-Alive static preview server
-  checks                           run REPO_KIT_CHECKS' list of {name, run} in order, as browser.yml does
-  verified-tree                    in a workflow: link each REPO_KIT_PLANS plan to a passed result of this tree
+  checks                           run PACKAGE_KIT_CHECKS' list of {name, run} in order, as browser.yml does
+  verified-tree                    in a workflow: link each PACKAGE_KIT_PLANS plan to a passed result of this tree
   test-hygiene [--init|--update]   shrink-only test rules: fixed sleeps, timing assertions, UI assertions (opt-in)
   file-budget [--staged] [--all] [--init|--update] [--json]
                                    per-glob file-size budgets (lines or bytes) and a shrink-only allowlist
@@ -28,7 +28,7 @@ const USAGE = `Usage: repo-kit <command>
   release-gate [<ref>] [--rerun] [--no-attest]
                                    the local release gate on a commit (default HEAD); records its commit status
   release-gate --mode              print release.gate: local or ci
-  ci-gate                          in a workflow: whether a job that needs the checks runs (REPO_KIT_NEEDS)
+  ci-gate                          in a workflow: whether a job that needs the checks runs (PACKAGE_KIT_NEEDS)
   publish [--resume]
   notify                           request publish.notify's workflows again
   friction <log|report|export>     deprecated: the local agent friction journal, moving to mastack
@@ -36,14 +36,18 @@ const USAGE = `Usage: repo-kit <command>
 
 // Commands 0.10.0 removed: each exits 1 with what to do instead.
 export const REMOVED_COMMANDS = {
-  tls: "repo-kit tls was removed in 0.10.0: Bun 1.4.4, the floor repo-kit and its setup-bun action require, already rejects the eMudhra chains. Delete the security:tls script.",
-  adopt: "repo-kit adopt was removed in 0.10.0: bump @maxvyshniakov/* pins by hand, or with bun update.",
-  rust: "repo-kit rust was removed in 0.10.0: repo-kit covers Bun JavaScript and TypeScript packages only. Run cargo directly.",
+  tls: "package-kit tls was removed in 0.10.0: Bun 1.4.4, the floor package-kit and its setup-bun action require, already rejects the eMudhra chains. Delete the security:tls script.",
+  adopt: "package-kit adopt was removed in 0.10.0: bump @maxvyshniakov/* pins by hand, or with bun update.",
+  rust: "package-kit rust was removed in 0.10.0: package-kit covers Bun JavaScript and TypeScript packages only. Run cargo directly.",
 };
 
-export const FRICTION_DEPRECATION = "repo-kit friction is deprecated and moves to mastack's friction command; it will be removed in a later release.";
+export const FRICTION_DEPRECATION = "package-kit friction is deprecated and moves to mastack's friction command; it will be removed in a later release.";
 
 export async function main([command, ...args]) {
+  if (Object.keys(process.env).some(name => name.startsWith("REPO_KIT_"))) {
+    const { legacyEnvironmentWarnings } = await import("./config.mjs");
+    for (const warning of legacyEnvironmentWarnings()) console.error(warning);
+  }
   if (Object.hasOwn(REMOVED_COMMANDS, command)) {
     console.error(REMOVED_COMMANDS[command]);
     return 1;
@@ -56,20 +60,21 @@ export async function main([command, ...args]) {
   }
   if (command === "checks") {
     const { parseChecks, runChecks } = await import("./checks.mjs");
-    return runChecks(parseChecks(process.env.REPO_KIT_CHECKS));
+    return runChecks(parseChecks(process.env.PACKAGE_KIT_CHECKS));
   }
   if (command === "verified-tree") {
     const { runVerifiedTree } = await import("./verified-tree.mjs");
     return runVerifiedTree();
   }
   if (command === "test-hygiene") {
-    // A repository without repo-kit.config.mjs (a Python one, say) gets the defaults.
-    const [{ findRoot, loadConfig }, { runTestHygiene }] = await Promise.all([import("./config.mjs"), import("./test-hygiene.mjs")]);
+    // A repository without package-kit.config.mjs (a Python one, say) gets the defaults.
+    const [{ findRoot, loadConfig, LegacyConfigError }, { runTestHygiene }] = await Promise.all([import("./config.mjs"), import("./test-hygiene.mjs")]);
     let root = null;
     try {
       root = findRoot();
-    } catch {
-      // No repo-kit.config.mjs: the repository's defaults. A broken config still fails below.
+    } catch (error) {
+      if (error instanceof LegacyConfigError) throw error;
+      // No package-kit.config.mjs: the repository's defaults. A broken config still fails below.
     }
     let config;
     if (root) config = await loadConfig(root);
@@ -81,12 +86,13 @@ export async function main([command, ...args]) {
   }
   if (command === "file-budget" || (command === "check" && args[0] === "file-budget")) {
     const budgetArgs = command === "check" ? args.slice(1) : args;
-    const [{ findRoot, loadConfig }, { runFileBudget }] = await Promise.all([import("./config.mjs"), import("./file-budget.mjs")]);
+    const [{ findRoot, loadConfig, LegacyConfigError }, { runFileBudget }] = await Promise.all([import("./config.mjs"), import("./file-budget.mjs")]);
     let root = null;
     try {
       root = findRoot();
-    } catch {
-      // No repo-kit.config.mjs: resolve the Git top-level directory.
+    } catch (error) {
+      if (error instanceof LegacyConfigError) throw error;
+      // No package-kit.config.mjs: resolve the Git top-level directory.
     }
     let config;
     if (root) config = await loadConfig(root);
@@ -177,7 +183,7 @@ export async function main([command, ...args]) {
     }
     case "check": {
       const { kitIssues } = await import("./check.mjs");
-      return report("repo-kit check", kitIssues(config.root, config));
+      return report("package-kit check", kitIssues(config.root, config));
     }
     case "check-changelogs": {
       const { runCheckChangelogs } = await import("./check-changelogs.mjs");
@@ -206,7 +212,7 @@ export async function main([command, ...args]) {
     }
     case "publish": {
       if (args.some(arg => arg === "--prerelease" || arg.startsWith("--prerelease=") || arg === "--dist-tag" || arg.startsWith("--dist-tag=") || arg === "--dry-run")) {
-        throw new Error("publish --prerelease was removed in 0.10.0; publish a release with `repo-kit release` and `repo-kit publish`");
+        throw new Error("publish --prerelease was removed in 0.10.0; publish a release with `package-kit release` and `package-kit publish`");
       }
       if (args.some(arg => arg !== "--resume")) throw new Error("Unknown publish option; the only one is --resume");
       const { runPublish } = await import("./publish.mjs");
@@ -248,7 +254,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
     // Not process.exit: piped output is written asynchronously.
     if (code !== undefined) process.exitCode = code;
   } catch (error) {
-    console.error(`repo-kit: ${error.message}`);
+    console.error(`package-kit: ${error.message}`);
     process.exitCode = 1;
   }
 }

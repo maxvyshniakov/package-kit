@@ -7,8 +7,8 @@
 //   bun run release:publish               the release gate, publish, tag, notify
 //   bun run release:publish -- --resume   finish a publication: the registries still missing it, the tag, its push
 //
-// The release gate is release.gate in repo-kit.config.mjs (release-gate.mjs):
-// "local" (the default) requires a passed `repo-kit release-gate` status on the
+// The release gate is release.gate in package-kit.config.mjs (release-gate.mjs):
+// "local" (the default) requires a passed `package-kit release-gate` status on the
 // commit; "ci" waits for the checks workflow (publish.checks) on it.
 //
 // publish.registry picks the registries: "github" (the default) runs
@@ -282,7 +282,7 @@ export async function runPublish(config, { resume = false, fetch: fetcher = glob
         `Published ${pkg.name}@${pkg.version}, but pushing ${tag} (tagger ${tagger}) failed.`,
         "If GitHub declined it for email privacy (GH007), tag it as the account's noreply address:",
         ...tagPushRecovery(tag, message, user ? noreplyEmail(user) : "<id>+<login>@users.noreply.github.com").map(line => `  ${line}`),
-        ...(config.publish.notify.length ? ["Then request the follow-up workflows: bun run repo-kit notify"] : []),
+        ...(config.publish.notify.length ? ["Then request the follow-up workflows: bun run package-kit notify"] : []),
       ]);
     }
     console.log(`Published ${pkg.name}@${pkg.version} to ${registries.map(kind => clients[kind].url).join(" and ")} and pushed ${tag}, tagged as ${tagger}.`);
@@ -335,7 +335,7 @@ export async function runPublish(config, { resume = false, fetch: fetcher = glob
     // prepack builds dist; the root bunfig.toml supplies the registry and token.
     execFileSync("bun", publishArguments(fs.existsSync(bunfig) ? bunfig : undefined), { cwd: pkg.dir, stdio: "inherit", env: { ...process.env, GITHUB_TOKEN: token } });
   } else if (action === "publish") {
-    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-publish-"));
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-publish-"));
     try {
       const archive = await releaseArchive({ pkg, clients, published, workDir });
       if (archive.refusal) return fail([`Not publishing ${pkg.name}@${pkg.version}: ${archive.refusal}`]);

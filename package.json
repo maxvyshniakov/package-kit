@@ -1,16 +1,16 @@
 {
-  "name": "@maxvyshniakov/repo-kit",
+  "name": "@maxvyshniakov/package-kit",
   "version": "0.10.0",
   "type": "module",
   "description": "Shared verification, pre-push, release and publish tooling for Bun-based JavaScript and TypeScript libraries.",
   "keywords": ["bun", "verify", "pre-push", "release", "changelog", "github-actions", "monorepo"],
   "author": "Max Wish (https://maxvyshniakov.com)",
-  "homepage": "https://github.com/maxvyshniakov/repo-kit#readme",
-  "bugs": "https://github.com/maxvyshniakov/repo-kit/issues",
+  "homepage": "https://github.com/maxvyshniakov/package-kit#readme",
+  "bugs": "https://github.com/maxvyshniakov/package-kit/issues",
   "packageManager": "bun@1.4.4",
   "bin": {
-    "repo-kit": "src/cli.mjs",
-    "repo-kit-lane": "src/lanefather.mjs"
+    "package-kit": "src/cli.mjs",
+    "package-kit-lane": "src/lanefather.mjs"
   },
   "exports": {
     ".": "./src/index.mjs",
@@ -58,14 +58,11 @@
     "check:hygiene": "node src/cli.mjs test-hygiene",
     "release": "node src/cli.mjs release",
     "release:publish": "node src/cli.mjs publish",
-    "repo-kit": "node src/cli.mjs"
+    "package-kit": "node src/cli.mjs"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maxvyshniakov/repo-kit.git"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com/"
+    "url": "git+https://github.com/maxvyshniakov/package-kit.git"
   }
 }

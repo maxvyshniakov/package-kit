@@ -1,4 +1,4 @@
-// The repository's repo-kit.config.mjs and the facts every command shares:
+// The repository's package-kit.config.mjs and the facts every command shares:
 // where the repository root is and which package it publishes.
 //
 //   export default {
@@ -13,7 +13,7 @@
 //   };
 //
 // loadConfig rejects a key it does not know (CONFIG_KEYS, STEP_KEYS), so a typo
-// or a key from another repo-kit version fails instead of being ignored.
+// or a key from another package-kit version fails instead of being ignored.
 import fs from "node:fs";
 import nodeModule from "node:module";
 import path from "node:path";
@@ -21,9 +21,37 @@ import { pathToFileURL } from "node:url";
 
 export { releasedPackages } from "./packages.mjs";
 
-export const CONFIG_FILE = "repo-kit.config.mjs";
+export const CONFIG_FILE = "package-kit.config.mjs";
 
-// Every key repo-kit reads, by section. test/config.test.mjs checks that src/
+/** The file name before the rename to package-kit; a repository that still has it fails with LEGACY_CONFIG_MESSAGE. */
+export const LEGACY_CONFIG_FILE = "repo-kit.config.mjs";
+export const LEGACY_CONFIG_MESSAGE = `@maxvyshniakov/repo-kit is now @maxvyshniakov/package-kit: rename ${LEGACY_CONFIG_FILE} to ${CONFIG_FILE}, and change its imports of "@maxvyshniakov/repo-kit" to "@maxvyshniakov/package-kit" (CHANGELOG.md)`;
+
+/** Thrown where only the pre-rename config exists; callers that fall back to the defaults without a config rethrow it. */
+export class LegacyConfigError extends Error {
+  constructor(dir) {
+    super(`${path.join(dir, LEGACY_CONFIG_FILE)}: ${LEGACY_CONFIG_MESSAGE}`);
+    this.name = "LegacyConfigError";
+  }
+}
+
+/**
+ * A warning for each REPO_KIT_* variable in `env`: package-kit reads PACKAGE_KIT_* instead, so
+ * a pre-rename name (a .lanefather.toml slot_env = "REPO_KIT_SLOT", say) would otherwise be ignored silently.
+ */
+export function legacyEnvironmentWarnings(env = process.env) {
+  return Object.keys(env).filter(name => name.startsWith("REPO_KIT_")).sort().map(name => {
+    const renamed = name.replace(/^REPO_KIT_/, "PACKAGE_KIT_");
+    const lane = name.startsWith("REPO_KIT_SLOT_") ? '; in .lanefather.toml set slot_env = "PACKAGE_KIT_SLOT"' : "";
+    return `package-kit: ${name} is ignored since the rename from repo-kit; set ${renamed}${lane}`;
+  });
+}
+
+function assertNotLegacy(dir) {
+  if (!fs.existsSync(path.join(dir, CONFIG_FILE)) && fs.existsSync(path.join(dir, LEGACY_CONFIG_FILE))) throw new LegacyConfigError(dir);
+}
+
+// Every key package-kit reads, by section. test/config.test.mjs checks that src/
 // reads no other and that each is read somewhere.
 export const CONFIG_KEYS = {
   verify: ["steps", "browser", "slots", "browserSlots", "workerMemory", "stepTimeout", "inert", "runner", "canary", "smoke"],
@@ -55,9 +83,9 @@ export const STEP_KEYS = ["name", "command", "needs", "after", "always", "cheap"
 
 /** Keys earlier releases read, with what to do now. */
 export const REMOVED_KEYS = {
-  adopt: "repo-kit adopt was removed in 0.10.0; delete the adopt section",
-  rust: "repo-kit rust was removed in 0.10.0; delete the rust section",
-  "changelog.versionSource": "pyproject.toml version sources were removed in 0.10.0; repo-kit releases package.json packages only, so delete changelog.versionSource",
+  adopt: "package-kit adopt was removed in 0.10.0; delete the adopt section",
+  rust: "package-kit rust was removed in 0.10.0; delete the rust section",
+  "changelog.versionSource": "pyproject.toml version sources were removed in 0.10.0; package-kit releases package.json packages only, so delete changelog.versionSource",
 };
 
 function editDistance(a, b) {
@@ -162,18 +190,19 @@ export function validateConfig(raw) {
   return raw;
 }
 
-/** The nearest directory at or above `start` that holds repo-kit.config.mjs. */
+/** The nearest directory at or above `start` that holds package-kit.config.mjs. */
 export function findRoot(start = process.cwd()) {
   let dir = path.resolve(start);
   for (;;) {
     if (fs.existsSync(path.join(dir, CONFIG_FILE))) return dir;
+    assertNotLegacy(dir);
     const parent = path.dirname(dir);
     if (parent === dir) throw new Error(`No ${CONFIG_FILE} at or above ${start}`);
     dir = parent;
   }
 }
 
-// repo-kit.config.mjs may import "@maxvyshniakov/repo-kit". The pre-push shim
+// package-kit.config.mjs may import "@maxvyshniakov/package-kit". The pre-push shim
 // can run this copy from the main checkout for a linked worktree that has no
 // node_modules, where Node would not find the package from the config's
 // directory; resolve the package to this copy, as a self-reference.
@@ -184,7 +213,7 @@ function resolveSelf() {
   resolvingSelf = true;
   nodeModule.registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier === "@maxvyshniakov/repo-kit" || specifier.startsWith("@maxvyshniakov/repo-kit/")) {
+      if (specifier === "@maxvyshniakov/package-kit" || specifier.startsWith("@maxvyshniakov/package-kit/")) {
         return nextResolve(specifier, { ...context, parentURL: kitPackage });
       }
       return nextResolve(specifier, context);
@@ -193,6 +222,7 @@ function resolveSelf() {
 }
 
 export async function loadConfig(root = findRoot()) {
+  assertNotLegacy(root);
   resolveSelf();
   const module = await import(pathToFileURL(path.join(root, CONFIG_FILE)).href);
   return { root, ...withDefaults(validateConfig(module.default ?? {})) };
@@ -207,15 +237,15 @@ export function withDefaults(config) {
     // access: npm's --access on npmjs.org; "public" unless set.
     publish: { checks: "check.yml", notify: [], registry: "github", access: "public", ...config.publish },
     changelog: { quickStart: "docs/GETTING_STARTED.md", peerScope: "@maxvyshniakov/", ...config.changelog },
-    // gate: "local" (repo-kit release-gate's attestation) or "ci" (the checks workflow); README.md#release-gate.
+    // gate: "local" (package-kit release-gate's attestation) or "ci" (the checks workflow); README.md#release-gate.
     release: { gate: "local", ...config.release },
     // managed: the managed hooks `hooks sync` writes and `hooks check` expects; default every one that applies.
     hooks: { ...config.hooks },
     packedConsumer: { ...config.packedConsumer },
-    // repo-kit shoot: the Storybook it reads by default, the Storybook app whose
+    // package-kit shoot: the Storybook it reads by default, the Storybook app whose
     // story files a failed index names, and the slots it leases.
     shoot: { url: "http://127.0.0.1:6010", storybookDir: "apps/storybook", slots: 1, ...config.shoot },
-    // repo-kit check file-budget / repo-kit file-budget: per-glob line or byte budgets and a shrink-only allowlist.
+    // package-kit check file-budget / package-kit file-budget: per-glob line or byte budgets and a shrink-only allowlist.
     fileBudget: { ...config.fileBudget },
   };
 }

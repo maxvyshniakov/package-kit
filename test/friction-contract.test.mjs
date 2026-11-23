@@ -56,7 +56,7 @@ for (const golden of contract.cases.build) {
 
 for (const golden of contract.cases.write) {
   test(`write case: ${golden.name}`, () => {
-    const journal = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-friction-write-")), "events.jsonl");
+    const journal = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-friction-write-")), "events.jsonl");
     if (golden.problems) {
       assert.deepEqual(validateEvent(journalEvent(golden.event)), golden.problems);
       assert.throws(() => appendEvent(golden.event, { FRICTION_JOURNAL: journal }), /friction event:/, "a refusal is an error, not silence");

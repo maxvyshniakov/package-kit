@@ -1,23 +1,23 @@
-// The release gate: what `repo-kit publish` requires before it publishes a
-// commit. repo-kit.config.mjs chooses it with one line:
+// The release gate: what `package-kit publish` requires before it publishes a
+// commit. package-kit.config.mjs chooses it with one line:
 //
-//   release: { gate: "local" }   (the default) a local run of `repo-kit release-gate`
+//   release: { gate: "local" }   (the default) a local run of `package-kit release-gate`
 //                                on that commit, recorded as a commit status
 //   release: { gate: "ci" }      the checks workflow (publish.checks) passed on that commit
 //
-// `repo-kit release-gate [<ref>]` (default HEAD) runs the gate in a clean
+// `package-kit release-gate [<ref>]` (default HEAD) runs the gate in a clean
 // temporary worktree of the exact commit, under one slotfather lease: a frozen
 // install, `verify --release`, and `verify --browser` when the repository
 // declares browser checks, with every Playwright Chromium started with software
 // compositing (chromium.mjs), as on the Linux CI runner. The result goes to GitHub as the commit status "Library checks
 // (local, <os>-<arch>)" (darwin-arm64: verified-tree counts it only for that platform), with a short summary that names the local log
-// (.git/repo-kit-gate/<sha>.log). A commit that passed is recorded in
-// .git/repo-kit-gate/passed and is not run again; the next run only records the
+// (.git/package-kit-gate/<sha>.log). A commit that passed is recorded in
+// .git/package-kit-gate/passed and is not run again; the next run only records the
 // status it could not (a commit GitHub did not have yet). --rerun runs it
 // again; --no-attest records nothing on GitHub.
 //
 // The workflows stay. Under gate "local" they are advisory: publish does not
-// wait for them, and the Storybook deploy (`repo-kit ci-gate`) runs whatever
+// wait for them, and the Storybook deploy (`package-kit ci-gate`) runs whatever
 // they concluded. Under gate "ci" publish waits for the checks workflow and the
 // deploy runs only after every job it needs passed.
 import { spawn } from "node:child_process";
@@ -56,7 +56,7 @@ export function localContext(platform = process.platform, arch = process.arch) {
 
 /**
  * The contexts the gate records: the platform one, then the deprecated
- * `Library checks (local, macOS)` (Linux, Windows) of repo-kit 0.6.0 and older,
+ * `Library checks (local, macOS)` (Linux, Windows) of package-kit 0.6.0 and older,
  * so a branch protection rule that requires the old name keeps passing. The old
  * name goes in the next batched minor release.
  */
@@ -95,8 +95,8 @@ export function attestationRefusal({ state, status }, sha) {
   }[state];
   return [
     reason,
-    `  Run it on this commit: bunx repo-kit release-gate ${sha.slice(0, 12)}`,
-    '  (release.gate is "local"; release: { gate: "ci" } in repo-kit.config.mjs waits for the checks workflow instead. README.md#release-gate)',
+    `  Run it on this commit: bunx package-kit release-gate ${sha.slice(0, 12)}`,
+    '  (release.gate is "local"; release: { gate: "ci" } in package-kit.config.mjs waits for the checks workflow instead. README.md#release-gate)',
   ];
 }
 
@@ -110,8 +110,8 @@ export function statusDescription({ passed, host, platform, kitVersion, seconds,
   const head = `${passed ? "Passed" : "Failed"} on ${host} (${PLATFORM_NAMES[platform] ?? platform}) in ${duration(seconds)}`;
   const tail = `; log ${log}`;
   const middles = [
-    `, repo-kit ${kitVersion}${browser ? `, ${browser} software-GPU Chromium launches` : ""}`,
-    `, repo-kit ${kitVersion}`,
+    `, package-kit ${kitVersion}${browser ? `, ${browser} software-GPU Chromium launches` : ""}`,
+    `, package-kit ${kitVersion}`,
     "",
   ];
   for (const middle of middles) {
@@ -127,14 +127,14 @@ export function ciGateDecision({ gate, needs }) {
   return { run: gate === "local" || !failed.length, failed };
 }
 
-/** `repo-kit ci-gate`: REPO_KIT_NEEDS is the caller's toJSON(needs); writes run=true|false to GITHUB_OUTPUT. */
+/** `package-kit ci-gate`: PACKAGE_KIT_NEEDS is the caller's toJSON(needs); writes run=true|false to GITHUB_OUTPUT. */
 export function runCiGate(config, env = process.env) {
   const gate = releaseGate(config);
   let needs;
   try {
-    needs = JSON.parse(env.REPO_KIT_NEEDS || "{}");
+    needs = JSON.parse(env.PACKAGE_KIT_NEEDS || "{}");
   } catch {
-    console.error(`REPO_KIT_NEEDS is not JSON: ${env.REPO_KIT_NEEDS}`);
+    console.error(`PACKAGE_KIT_NEEDS is not JSON: ${env.PACKAGE_KIT_NEEDS}`);
     return 1;
   }
   const { run, failed } = ciGateDecision({ gate, needs });
@@ -157,8 +157,12 @@ export async function readAttestation(repository, sha, token, fetcher = fetch) {
 
 export const PASSED_RECORD = "passed";
 
-/** Commits that passed on this machine: "<sha> <seconds>" per line; sha to seconds. */
-const gateRecord = recordDir => passedRecord(recordDir, PASSED_RECORD, {
+/**
+ * Commits that passed on this machine: "<sha> <seconds>" per line; sha to seconds.
+ * The record of the kit before its rename to package-kit (.git/repo-kit-gate) still counts.
+ */
+export const gateRecord = recordDir => passedRecord(recordDir, PASSED_RECORD, {
+  legacy: [path.join("..", "repo-kit-gate", PASSED_RECORD)],
   parse: line => {
     const [sha, seconds] = line.split(" ");
     return [sha, Number(seconds) || 0];
@@ -176,7 +180,7 @@ const gateRecord = recordDir => passedRecord(recordDir, PASSED_RECORD, {
 export async function softwareChromium({ worktree, env, step }) {
   if (!playwrightChromium(worktree, env)) return undefined;
   if (await step("playwright", "bunx", ["playwright", "install", "--no-shell", "chromium"]) !== 0) throw new Error("bunx playwright install --no-shell chromium failed");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-gate-chromium-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-gate-chromium-"));
   const mirror = path.join(dir, "ms-playwright");
   const log = path.join(dir, "launches");
   fs.writeFileSync(log, "");
@@ -192,7 +196,7 @@ export async function softwareChromium({ worktree, env, step }) {
     const count = () => fs.readFileSync(log, "utf8").split("\n").filter(Boolean).length;
     const baseline = count();
     return {
-      env: { PLAYWRIGHT_BROWSERS_PATH: mirror, REPO_KIT_CHROMIUM_SWITCHES: SOFTWARE_SWITCHES.join(" ") },
+      env: { PLAYWRIGHT_BROWSERS_PATH: mirror, PACKAGE_KIT_CHROMIUM_SWITCHES: SOFTWARE_SWITCHES.join(" ") },
       summary: `${path.relative(mirror, executable).split(path.sep)[0]} with ${SOFTWARE_SWITCHES.join(" ")}: gpu_compositing ${status.gpu_compositing}, rasterization ${status.rasterization}`,
       launches: () => count() - baseline,
       cleanup,
@@ -211,7 +215,7 @@ function parseArguments(args) {
   return { ref: refs[0] ?? "HEAD", attest: !args.includes("--no-attest"), rerun: args.includes("--rerun") };
 }
 
-/** `repo-kit release-gate [<ref>] [--rerun] [--no-attest]`; resolves to the exit code. */
+/** `package-kit release-gate [<ref>] [--rerun] [--no-attest]`; resolves to the exit code. */
 export async function runReleaseGate(config, args = [], deps = {}) {
   const {
     env = process.env,
@@ -232,7 +236,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   const sha = git("rev-parse", "--verify", `${options.ref}^{commit}`);
   const short = sha.slice(0, 12);
   const gitDir = commonGitDir(config.root, gitEnv);
-  const recordDir = path.join(gitDir, "repo-kit-gate");
+  const recordDir = path.join(gitDir, "package-kit-gate");
   const passedStore = gateRecord(recordDir);
   const logFile = path.join(recordDir, `${short}.log`);
   const logLabel = path.relative(path.dirname(gitDir), logFile);
@@ -265,7 +269,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
     }
     if (posted.unknownCommit) {
       return fail(passed
-        ? `release-gate: ${short} passed, but GitHub does not have it yet: push it, then run bunx repo-kit release-gate ${short} to record the attestation (it will not run again).`
+        ? `release-gate: ${short} passed, but GitHub does not have it yet: push it, then run bunx package-kit release-gate ${short} to record the attestation (it will not run again).`
         : `release-gate: ${short} failed; GitHub does not have it, so nothing was recorded there.`);
     }
     return fail(`release-gate: recording the status on ${short} failed: ${posted.message}`);
@@ -330,7 +334,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
         });
       });
 
-      say(`release-gate: ${short} (${options.ref}) in ${worktree}, repo-kit ${KIT_VERSION}, log ${logFile}\n`);
+      say(`release-gate: ${short} (${options.ref}) in ${worktree}, package-kit ${KIT_VERSION}, log ${logFile}\n`);
       say(`release-gate: slotfather lease ${env.SLOTFATHER_LEASE ? `${env.SLOTFATHER_LEASE} (${env.SLOTFATHER_COUNT ?? "?"} slots)` : "none"}\n`);
       let ok = await timed("install", () => step("install", "bun", ["install", "--frozen-lockfile"]));
       let commands = {};
@@ -369,7 +373,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
           record("software Chromium launches", true, `${launches} Chromium launches with ${SOFTWARE_SWITCHES.join(" ")}`);
         }
       } else if (ok) {
-        say("\nrelease-gate: no verify.browser in this commit's repo-kit.config.mjs and no verify:browser script; no browser checks to run.\n");
+        say("\nrelease-gate: no verify.browser in this commit's package-kit.config.mjs and no verify:browser script; no browser checks to run.\n");
       }
       const seconds = (Date.now() - started) / 1000;
       const passed = ok && !signals.stopped;
@@ -379,7 +383,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
       if (signals.stopped) return signals.exitCode();
       if (passed) passedStore.add(sha, seconds);
       return await attest({ passed, seconds, browser: launches });
-    }, { prefix: "repo-kit-release-gate-", env: gitEnv });
+    }, { prefix: "package-kit-release-gate-", env: gitEnv });
   } finally {
     signals.dispose();
     chromium?.cleanup();

@@ -1,10 +1,10 @@
-// repo-kit shoot: screenshots Storybook stories for a visual review, every
+// package-kit shoot: screenshots Storybook stories for a visual review, every
 // story whose id contains one of the filters, in each theme, width and browser.
 //
-//   repo-kit shoot button--default
-//   repo-kit shoot showcase --theme=light,dark --width=1280,375 --out=/tmp/shots
-//   repo-kit shoot showcase --browser=chromium,firefox,webkit,safari
-//   repo-kit shoot http://127.0.0.1:6020 showcase --viewport      (no full page)
+//   package-kit shoot button--default
+//   package-kit shoot showcase --theme=light,dark --width=1280,375 --out=/tmp/shots
+//   package-kit shoot showcase --browser=chromium,firefox,webkit,safari
+//   package-kit shoot http://127.0.0.1:6020 showcase --viewport      (no full page)
 //
 // It reads a running Storybook and writes <out>/<story-id>-<theme>-<width>.png,
 // with -<browser> appended for every browser but Chromium. Before each picture
@@ -60,9 +60,9 @@ const list = (flag, value, what) => {
 };
 
 /**
- * `repo-kit shoot` arguments. The Storybook is the first bare http(s) URL or
+ * `package-kit shoot` arguments. The Storybook is the first bare http(s) URL or
  * `--url=`, else SID_KIT_STORYBOOK_URL, STORYBOOK_URL, then `shoot.url` from
- * repo-kit.config.mjs (default http://127.0.0.1:6010).
+ * package-kit.config.mjs (default http://127.0.0.1:6010).
  */
 export function parseShootArgs(argv, { root, env = process.env, tmpdir = os.tmpdir(), cwd = process.cwd(), shoot = {} } = {}) {
   const options = {
@@ -104,7 +104,7 @@ export function loadPlaywright(root) {
     return require("playwright");
   } catch (error) {
     if (error.code !== "MODULE_NOT_FOUND") throw error;
-    throw new Error(`repo-kit shoot needs playwright in ${root}: add it to its devDependencies`);
+    throw new Error(`package-kit shoot needs playwright in ${root}: add it to its devDependencies`);
   }
 }
 
@@ -313,7 +313,7 @@ export async function shootStories(options, { launch, fetch: get = fetch, sleep 
   return files;
 }
 
-/** `repo-kit shoot <filters...> [<url>|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]`. */
+/** `package-kit shoot <filters...> [<url>|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]`. */
 export async function runShoot(config, argv) {
   const options = parseShootArgs(argv, { root: config.root, shoot: config.shoot });
   let playwright;

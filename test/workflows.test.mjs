@@ -50,7 +50,7 @@ test("verify.yml checks out one commit unless the caller asks for history", () =
   assert.match(text, / {8}uses: actions\/checkout@[0-9a-f]{40}\n {8}with:\n {10}fetch-depth: \$\{\{ inputs\.fetch-depth \}\}\n/);
 });
 
-test("repo-kit's own main checks use the current action and ordinary verification", () => {
+test("package-kit's own main checks use the current action and ordinary verification", () => {
   const text = read(path.join(workflowsDir, "check.yml"));
   assert.match(text, /- uses: \.\/actions\/setup-bun\n/);
   assert.ok(!text.includes(releaseArgs));
@@ -61,8 +61,8 @@ test("repo-kit's own main checks use the current action and ordinary verificatio
 
 test("browser.yml builds once and runs every check after it in one job, under one lease", () => {
   const browser = read(path.join(workflowsDir, "browser.yml"));
-  assert.match(browser, /\n {8}run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'eval "\$BUILD" && node_modules\/\.bin\/repo-kit checks'\n/);
-  assert.match(browser, /REPO_KIT_CHECKS: \$\{\{ inputs\.checks \}\}\n/);
+  assert.match(browser, /\n {8}run: node_modules\/\.bin\/package-kit heavy "\$SLOTS" sh -c 'eval "\$BUILD" && node_modules\/\.bin\/package-kit checks'\n/);
+  assert.match(browser, /PACKAGE_KIT_CHECKS: \$\{\{ inputs\.checks \}\}\n/);
   // A job per check built Storybook once per check: three builds at once broke
   // Sid-Kit 0.41.1's checks on a self-hosted runner with a 10 GiB cap.
   assert.doesNotMatch(browser, /matrix:/, "one job, one build");
@@ -71,36 +71,36 @@ test("browser.yml builds once and runs every check after it in one job, under on
   for (const file of ["verify.yml", "browser.yml"]) {
     const text = read(path.join(workflowsDir, file));
     assert.match(text, /\n      slot-wait:\n/, file);
-    assert.match(text, /REPO_KIT_SLOT_WAIT: \$\{\{ inputs\.slot-wait \}\}\n/, file);
+    assert.match(text, /PACKAGE_KIT_SLOT_WAIT: \$\{\{ inputs\.slot-wait \}\}\n/, file);
   }
 });
 
 test("every heavy step of the reusable workflows runs under a lease of the whole runner by default", () => {
   const leased = {
     "verify.yml": /\n {8}run: bun run verify -- \$RELEASE_ARGS \$VERIFY_ARGS\n/,
-    "deploy-storybook.yml": /run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'bun run build && bun run storybook:build'\n/,
-    "browser.yml": /\n {8}run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'eval "\$BUILD" && node_modules\/\.bin\/repo-kit checks'\n/,
-    "release.yml": /run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'eval "\$COMMAND"'\n/,
+    "deploy-storybook.yml": /run: node_modules\/\.bin\/package-kit heavy "\$SLOTS" sh -c 'bun run build && bun run storybook:build'\n/,
+    "browser.yml": /\n {8}run: node_modules\/\.bin\/package-kit heavy "\$SLOTS" sh -c 'eval "\$BUILD" && node_modules\/\.bin\/package-kit checks'\n/,
+    "release.yml": /run: node_modules\/\.bin\/package-kit heavy "\$SLOTS" sh -c 'eval "\$COMMAND"'\n/,
   };
   for (const [file, step] of Object.entries(leased)) {
     const text = read(path.join(workflowsDir, file));
     assert.match(text, step, file);
     assert.match(text, /\n      slots:\n(?:        .*\n)*?        type: string\n        default: all\n/, `${file}: slots defaults to all`);
-    assert.match(text, /REPO_KIT_SLOT_WAIT: \$\{\{ inputs\.slot-wait \}\}\n/, file);
+    assert.match(text, /PACKAGE_KIT_SLOT_WAIT: \$\{\{ inputs\.slot-wait \}\}\n/, file);
     // Nothing heavy outside the lease: no build or check as a step of its own.
     assert.doesNotMatch(text, /- run: (bun run (build|storybook:build|storybook:prepare-deploy)|eval "\$(BUILD|CHECK|COMMAND)")\n/, `${file} runs a heavy step outside the lease`);
   }
   // prepare-deploy installs and builds the retained releases' Storybooks: heavy.
-  assert.match(read(path.join(workflowsDir, "deploy-storybook.yml")), /run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" bun run storybook:prepare-deploy\n/);
+  assert.match(read(path.join(workflowsDir, "deploy-storybook.yml")), /run: node_modules\/\.bin\/package-kit heavy "\$SLOTS" bun run storybook:prepare-deploy\n/);
   // verify leases itself: the workflow tells it how many slots.
-  assert.match(read(path.join(workflowsDir, "verify.yml")), /REPO_KIT_VERIFY_SLOTS: \$\{\{ inputs\.slots \}\}\n/);
+  assert.match(read(path.join(workflowsDir, "verify.yml")), /PACKAGE_KIT_VERIFY_SLOTS: \$\{\{ inputs\.slots \}\}\n/);
 });
 
 test("third-party actions are pinned by commit SHA", () => {
   const files = [...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)), ...actionFiles, npmTemplate];
   for (const file of files) {
     for (const [, target] of read(file).matchAll(/(?<!\w)uses: ([^\s]+)/g)) {
-      if (target.startsWith("./") || target.startsWith("maxvyshniakov/repo-kit/")) continue;
+      if (target.startsWith("./") || target.startsWith("maxvyshniakov/package-kit/")) continue;
       assert.match(target, /@[0-9a-f]{40}$/, `${path.basename(file)}: ${target}`);
     }
   }
@@ -120,7 +120,7 @@ test("no action or workflow runs the removed TLS gate", () => {
     ...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)),
     ...fs.readdirSync(path.join(kitRoot, "actions")).map(dir => path.join(kitRoot, "actions", dir, "action.yml")),
   ];
-  for (const file of files) assert.doesNotMatch(read(file), /tls-gate|repo-kit tls\b/, path.relative(kitRoot, file));
+  for (const file of files) assert.doesNotMatch(read(file), /tls-gate|package-kit tls\b/, path.relative(kitRoot, file));
 });
 
 test("inputs reach shell commands through the environment, not through expressions", () => {
@@ -173,10 +173,10 @@ test("the Storybook deploy follows release.gate: it runs whatever the checks con
   const text = read(path.join(workflowsDir, "deploy-storybook.yml"));
   // The caller passes toJSON(needs); without it the caller's own needs order the deploy, as before.
   assert.match(text, /\n      needs:\n(?: {8}.*\n)*? {8}type: string\n {8}default: "\{\}"\n/);
-  const gate = text.indexOf("- id: gate\n        run: node_modules/.bin/repo-kit ci-gate\n");
-  assert.ok(gate > 0, "the gate step runs repo-kit ci-gate");
-  assert.match(text, /REPO_KIT_NEEDS: \$\{\{ inputs\.needs \}\}\n/);
-  assert.ok(gate > text.indexOf("uses: maxvyshniakov/repo-kit/actions/setup-bun@"), "it reads the installed kit's config");
+  const gate = text.indexOf("- id: gate\n        run: node_modules/.bin/package-kit ci-gate\n");
+  assert.ok(gate > 0, "the gate step runs package-kit ci-gate");
+  assert.match(text, /PACKAGE_KIT_NEEDS: \$\{\{ inputs\.needs \}\}\n/);
+  assert.ok(gate > text.indexOf("uses: maxvyshniakov/package-kit/actions/setup-bun@"), "it reads the installed kit's config");
   // Every step after the gate runs only when it says so.
   const after = text.slice(gate).split("\n      - ").slice(1);
   assert.ok(after.length >= 3, after.join("\n---\n"));
@@ -187,7 +187,7 @@ test("the Storybook deploy follows release.gate: it runs whatever the checks con
   assert.match(readme, /needs: \$\{\{ toJSON\(needs\) \}\}/);
 });
 
-test("public pull requests never run repo-kit's untrusted checkout on a private runner", () => {
+test("public pull requests never run package-kit's untrusted checkout on a private runner", () => {
   const text = read(path.join(workflowsDir, "check.yml"));
   assert.match(text, /pull_request:/);
   assert.match(text, /runs-on: ubuntu-latest/);
@@ -245,7 +245,7 @@ test("verified-tree.yml looks the tree up with read-only tokens and no checkout,
   assert.deepEqual(block[1].trim().split("\n").map(line => line.trim()), ["contents: read", "checks: read", "statuses: read", "actions: read"]);
   // Nothing from the commit runs: the lookup reads GitHub's API only.
   assert.doesNotMatch(text, /actions\/checkout/);
-  assert.match(text, /uses: maxvyshniakov\/repo-kit\/actions\/verified-tree@v[\d.]+\n/);
+  assert.match(text, /uses: maxvyshniakov\/package-kit\/actions\/verified-tree@v[\d.]+\n/);
   assert.match(text, /\n {4}outputs:\n {6}urls:\n(?: {8}.*\n)*? {8}value: \$\{\{ jobs\.lookup\.outputs\.urls \}\}\n/);
   for (const { ref } of kitReferences(text)) assert.equal(ref, `v${KIT_VERSION}`);
   for (const [, command] of text.matchAll(/run: (.+)/g)) assert.doesNotMatch(command, /\$\{\{/, command);
@@ -255,8 +255,8 @@ test("the verified-tree action runs the kit's lookup with Node alone", () => {
   const text = read(path.join(kitRoot, "actions/verified-tree/action.yml"));
   assert.match(text, /run: node "\$GITHUB_ACTION_PATH\/\.\.\/\.\.\/src\/verified-tree\.mjs"\n/);
   assert.ok(fs.existsSync(path.resolve(kitRoot, "actions/verified-tree", "../../src/verified-tree.mjs")));
-  assert.match(text, /REPO_KIT_PLANS: \$\{\{ inputs\.plans \}\}\n/);
-  assert.match(text, /REPO_KIT_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n/);
+  assert.match(text, /PACKAGE_KIT_PLANS: \$\{\{ inputs\.plans \}\}\n/);
+  assert.match(text, /PACKAGE_KIT_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}\n/);
   assert.match(text, /\noutputs:\n {2}urls:\n(?: {4}.*\n)*? {4}value: \$\{\{ steps\.lookup\.outputs\.urls \}\}\n/);
 });
 
@@ -283,10 +283,10 @@ test("verify.yml and browser.yml upload JUnit reports when the caller names them
     assert.match(upload, /if-no-files-found: warn/, file);
   }
   assert.match(read(path.join(workflowsDir, "verify.yml")), /path: \$\{\{ inputs\.junit \}\}\n/);
-  // repo-kit checks writes its per-check timings beside the caller's reports.
+  // package-kit checks writes its per-check timings beside the caller's reports.
   const browser = read(path.join(workflowsDir, "browser.yml"));
-  assert.match(browser, /REPO_KIT_CHECKS_JUNIT: \$\{\{ inputs\.junit != '' && 'repo-kit-junit\/checks\.xml' \|\| '' \}\}\n/);
-  assert.match(browser, /path: \|\n {12}\$\{\{ inputs\.junit \}\}\n {12}repo-kit-junit\/\n/);
+  assert.match(browser, /PACKAGE_KIT_CHECKS_JUNIT: \$\{\{ inputs\.junit != '' && 'package-kit-junit\/checks\.xml' \|\| '' \}\}\n/);
+  assert.match(browser, /path: \|\n {12}\$\{\{ inputs\.junit \}\}\n {12}package-kit-junit\/\n/);
 });
 
 const template = path.join(kitRoot, "docs/templates/check.yml");
@@ -304,7 +304,7 @@ test("the caller template: fast checks on main, the full suite nightly and on re
   assert.ok("workflow_dispatch" in doc.on);
 
   const { tree, check, browser } = doc.jobs;
-  assert.match(tree.uses, /^maxvyshniakov\/repo-kit\/\.github\/workflows\/verified-tree\.yml@v/);
+  assert.match(tree.uses, /^maxvyshniakov\/package-kit\/\.github\/workflows\/verified-tree\.yml@v/);
   assert.deepEqual(tree.permissions, { contents: "read", checks: "read", statuses: "read", actions: "read" });
   assert.equal(tree.with.force, "${{ github.event_name == 'workflow_dispatch' }}", "a manual run checks again");
   const plans = JSON.parse(tree.with.plans);
@@ -325,6 +325,29 @@ test("the caller template: fast checks on main, the full suite nightly and on re
   // GitHub-hosted by default: the template names no runner.
   for (const job of Object.values(doc.jobs)) assert.equal(job.with?.runner, undefined);
   for (const { ref } of kitReferences(read(template))) assert.equal(ref, `v${KIT_VERSION}`);
+});
+
+test("package-kit's own npm release checks verify --release, then publishes with this commit's actions and id-token: write in that job only", () => {
+  const file = path.join(workflowsDir, NPM_RELEASE_WORKFLOW);
+  const script = `console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(${JSON.stringify(file)}).text())));`;
+  const result = spawnSync("bun", ["-e", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const doc = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(doc.on), ["workflow_dispatch"]);
+  assert.deepEqual(doc.permissions, { contents: "read" });
+  const { check, publish } = doc.jobs;
+  assert.deepEqual(check.permissions, { contents: "read" });
+  assert.deepEqual(check.steps.map(step => step.uses ?? step.run).slice(1), ["./actions/setup-bun", "bun run verify -- --release"]);
+  assert.deepEqual(publish.needs, ["check"]);
+  assert.equal(publish.if, "${{ github.ref == 'refs/heads/main' }}");
+  assert.deepEqual(publish.permissions, { contents: "write", "id-token": "write" });
+  assert.equal(publish["runs-on"], "ubuntu-latest", "provenance comes from a GitHub-hosted runner");
+  assert.match(publish.steps[0].uses, /^actions\/checkout@[0-9a-f]{40}$/);
+  assert.equal(publish.steps[0].with["fetch-depth"], 0);
+  assert.deepEqual(publish.steps.slice(1).map(step => step.uses), ["./actions/setup-bun", "./actions/npm-publish"]);
+  // package-kit is not in its own node_modules/.bin.
+  assert.deepEqual(publish.steps[2].with, { kit: "src/cli.mjs" });
+  assert.match(read(file), /npm trust github @maxvyshniakov\/package-kit --file release-npm\.yml --repo maxvyshniakov\/package-kit/);
 });
 
 // release.yml's callers grant contents: write and packages: write. A new scope
@@ -350,8 +373,12 @@ test("the npm-publish action installs npm with trusted publishing, writes no tok
   assert.match(steps[2], /^name: Require the OIDC token/);
   assert.match(steps[2], /ACTIONS_ID_TOKEN_REQUEST_URL/);
   assert.match(steps[2], /exit 1/);
-  // The publication is heavy (prepack builds), so it leases like release.yml.
-  assert.match(steps[3], /run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'eval "\$COMMAND"'\n/);
+  // The publication is heavy (prepack builds), so it leases like release.yml and defaults committer identity for annotated tags.
+  assert.match(steps[3], /export GIT_COMMITTER_NAME="\$\{GIT_COMMITTER_NAME:-github-actions\[bot\]\}"\n/);
+  assert.match(steps[3], /export GIT_COMMITTER_EMAIL="\$\{GIT_COMMITTER_EMAIL:-41898282\+github-actions\[bot\]@users\.noreply\.github\.com\}"\n/);
+  assert.match(steps[3], /exec "\$KIT" heavy "\$SLOTS" sh -c 'eval "\$COMMAND"'\n/);
+  assert.match(steps[3], /KIT: \$\{\{ inputs\.kit \}\}\n/);
+  assert.match(text, /\n {2}kit:\n(?: {4}.*\n)*? {4}default: node_modules\/\.bin\/package-kit\n/);
   assert.match(steps[3], /COMMAND: \$\{\{ inputs\.command \}\}\n/);
   assert.match(text, /\n {2}command:\n(?: {4}.*\n)*? {4}default: bun run release:publish\n/);
 });
@@ -363,7 +390,7 @@ test("the npm caller template grants id-token: write to the publishing job only,
   const doc = JSON.parse(result.stdout);
   assert.deepEqual(doc.permissions, { contents: "read", packages: "read" }, "the workflow's default token is read-only");
   const { check, publish } = doc.jobs;
-  assert.match(check.uses, /^maxvyshniakov\/repo-kit\/\.github\/workflows\/verify\.yml@v/);
+  assert.match(check.uses, /^maxvyshniakov\/package-kit\/\.github\/workflows\/verify\.yml@v/);
   assert.deepEqual(check.permissions, { contents: "read", packages: "read" });
   assert.equal(publish.needs, "check", "inside Actions the caller's jobs gate the publication");
   assert.equal(publish.if, "${{ github.ref == 'refs/heads/main' }}");
@@ -372,8 +399,8 @@ test("the npm caller template grants id-token: write to the publishing job only,
   const uses = publish.steps.map(step => step.uses);
   assert.match(uses[0], /^actions\/checkout@[0-9a-f]{40}$/);
   assert.equal(publish.steps[0].with["fetch-depth"], 0, "publish reads tags and the release commit");
-  assert.match(uses[1], /^maxvyshniakov\/repo-kit\/actions\/setup-bun@v/);
-  assert.match(uses[2], /^maxvyshniakov\/repo-kit\/actions\/npm-publish@v/);
+  assert.match(uses[1], /^maxvyshniakov\/package-kit\/actions\/setup-bun@v/);
+  assert.match(uses[2], /^maxvyshniakov\/package-kit\/actions\/npm-publish@v/);
   for (const { ref } of kitReferences(read(npmTemplate))) assert.equal(ref, `v${KIT_VERSION}`);
   // The trusted publisher registration names this caller's file.
   assert.match(read(npmTemplate), new RegExp(`npm trust github <package> --file ${NPM_RELEASE_WORKFLOW.replace(".", "\\.")} --repo`));

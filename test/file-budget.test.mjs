@@ -32,7 +32,7 @@ function makeRepo(t, files = {}, config = "export default {};\n") {
   const git = (...args) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
   git("init", "-q", "-b", "main");
   if (config !== null) {
-    fs.writeFileSync(path.join(root, "repo-kit.config.mjs"), config);
+    fs.writeFileSync(path.join(root, "package-kit.config.mjs"), config);
   }
   const write = (name, content, { track = false } = {}) => {
     const full = path.join(root, name);
@@ -235,7 +235,7 @@ test("Data-Grid-style 20,000-byte staged check, exclusions, and SHA-256 provenan
   assert.match(res.err, /SHA-256/);
 });
 
-test("CLI runs both `repo-kit file-budget` and `repo-kit check file-budget`, and preserves `repo-kit check`", t => {
+test("CLI runs both `package-kit file-budget` and `package-kit check file-budget`, and preserves `package-kit check`", t => {
   const repo = makeRepo(
     t,
     {

@@ -113,10 +113,10 @@ test("Safari needs no Playwright", async () => {
 });
 
 test("Playwright comes from the repository, with a message when it has none", async () => {
-  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
   try {
     fs.writeFileSync(path.join(empty, "package.json"), "{}\n");
-    assert.throws(() => loadPlaywright(empty), /repo-kit shoot needs playwright in .*: add it to its devDependencies/);
+    assert.throws(() => loadPlaywright(empty), /package-kit shoot needs playwright in .*: add it to its devDependencies/);
     const module = path.join(empty, "node_modules/playwright");
     fs.mkdirSync(module, { recursive: true });
     fs.writeFileSync(path.join(module, "package.json"), '{"name": "playwright", "main": "index.js"}\n');
@@ -124,7 +124,7 @@ test("Playwright comes from the repository, with a message when it has none", as
     assert.deepEqual(loadPlaywright(empty).chromium, { from: "the repository" });
     fs.writeFileSync(path.join(module, "package.json"), '{"name": "playwright", "version": "1.56.1", "main": "index.js"}\n');
     assert.equal(playwrightVersion(empty), "1.56.1");
-    const none = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+    const none = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
     try {
       assert.equal(playwrightVersion(none), undefined);
     } finally {
@@ -172,7 +172,7 @@ const index = { entries: {
 const fetchIndex = async url => ({ ok: true, json: async () => (assert.equal(url, "http://sb/index.json"), index) });
 
 test("shoot waits for the story, a settle, then the viewport images loaded and decoded, before each picture", async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
   const { calls, launch } = fakeBrowsers();
   const sleeps = [];
   try {
@@ -203,7 +203,7 @@ test("shoot waits for the story, a settle, then the viewport images loaded and d
 });
 
 test("shoot reloads a story that shows the Vite error overlay, then waits again", async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
   const { calls, launch } = fakeBrowsers({ overlays: 1 });
   try {
     await shootStories(
@@ -231,7 +231,7 @@ test("shoot reloads a story that shows the Vite error overlay, then waits again"
 
 test("a full page taller than any engine can picture is cut to its top 16384 px, with a warning", async () => {
   // Firefox refuses a screenshot taller than 65535 px; Chromium writes a picture nothing opens.
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
   const { calls, launch } = fakeBrowsers({ height: 390104 });
   const warnings = [];
   try {
@@ -257,7 +257,7 @@ test("shoot fails when no story id matches", async () => {
 });
 
 test("a failed index that names a story file touches it so the dev server indexes again", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
   try {
     const story = path.join(dir, "src/button.stories.tsx");
     fs.mkdirSync(path.dirname(story), { recursive: true });
@@ -278,8 +278,8 @@ test("a failed index that names a story file touches it so the dev server indexe
   }
 });
 
-test("repo-kit shoot rejects bad arguments before it takes a lease", () => {
-  const repository = tempRepository({ "package.json": { name: "example" }, "repo-kit.config.mjs": "export default {};\n" });
+test("package-kit shoot rejects bad arguments before it takes a lease", () => {
+  const repository = tempRepository({ "package.json": { name: "example" }, "package-kit.config.mjs": "export default {};\n" });
   try {
     const bin = path.join(repository.root, "bin");
     fs.mkdirSync(bin);
@@ -299,7 +299,7 @@ test("repo-kit shoot rejects bad arguments before it takes a lease", () => {
   }
 });
 
-// repo-kit#3: the overall review of 0.3.1.
+// package-kit#3: the overall review of 0.3.1.
 
 test("decoding the images in view skips ones that never loaded and gives up after 5 s", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -323,7 +323,7 @@ test("decoding the images in view skips ones that never loaded and gives up afte
 
 test("a story the overlay never leaves, or that shows Storybook's error, gets no picture and fails the run", async () => {
   for (const [shape, reason] of [[{ overlays: 99 }, /Vite error overlay stays after 6 reloads/], [{ errorDisplay: true }, /Storybook shows the story's error/]]) {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-shoot-"));
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-shoot-"));
     const { calls, launch } = fakeBrowsers(shape);
     const warnings = [];
     try {
@@ -386,7 +386,7 @@ test("SIGTERM or SIGHUP closes the open browser before the run exits", async () 
 });
 
 test('final browser cleanup failure prevents reporting screenshot success', async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-close-'));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-close-'));
   const fake = fakeBrowsers();
   try {
     await assert.rejects(shootStories({ filters: ['button'], themes: ['light'], widths: [1280], browsers: ['safari'], out, full: false, url: 'http://sb' }, {

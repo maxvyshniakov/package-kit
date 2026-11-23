@@ -11,7 +11,7 @@ import {
 } from "../src/friction.mjs";
 import { kitRoot } from "./fixtures.mjs";
 
-const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-friction-"));
+const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-friction-"));
 const event = (fields = {}) => ({
   v: 1, ts: "2026-11-10T10:00:00.000Z", project: "app", package: "@acme/kit", kind: "type-error",
   component: "Button", rule: "TS2322", detail: "", session: "s1", source: "repo-kit", ...fields,
@@ -143,5 +143,5 @@ test("the CLI logs, reports and exports through one journal", () => {
   const exported = cli(["export", "--out", out], env);
   assert.equal(exported.status, 0, exported.stderr);
   assert.equal(JSON.parse(fs.readFileSync(out, "utf8")).rows[0].component, "Button");
-  assert.match(cli(["help"], env).stdout, /repo-kit friction log/);
+  assert.match(cli(["help"], env).stdout, /package-kit friction log/);
 });

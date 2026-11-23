@@ -1,15 +1,15 @@
-# Repo-Kit
+# Package-Kit
 
 A shared verification and release workflow for Bun-based JavaScript and TypeScript libraries.
 
 When several repositories copy the same test scripts, Git hooks and release commands, they gradually disagree.
 One checks the working tree, another checks the pushed commit; one publishes the right archive, another forgets
-a version or a tag. Repo-Kit puts that machinery in one versioned package. Each repository declares its own
+a version or a tag. Package-Kit puts that machinery in one versioned package. Each repository declares its own
 commands and pins the version that verifies them.
 
 ## What it solves
 
-| Pain | Repo-Kit's part |
+| Pain | Package-Kit's part |
 | --- | --- |
 | Verification scripts drift between repositories | One runner executes each project's configured steps, dependencies, timeouts and memory budget. |
 | Local checks pass but the pushed revision differs | The pre-push gate checks exact outgoing commits in clean worktrees with frozen dependencies. |
@@ -25,7 +25,7 @@ released package keeps its version in `package.json`.
 
 ## Status
 
-Repo-Kit is one maintainer's working tooling, published as a reference and case study. It verifies and releases a
+Package-Kit is one maintainer's working tooling, published as a reference and case study. It verifies and releases a
 small family of the author's TypeScript libraries (a component kit, a data grid and two text utilities), each of
 which pins an exact version. Before 1.0.0 a minor release may break configuration or commands; every change is in
 the [changelog](CHANGELOG.md). Use it as is, fork it, or borrow its ideas. Issues are welcome; see
@@ -35,7 +35,7 @@ the [changelog](CHANGELOG.md). Use it as is, fork it, or borrow its ideas. Issue
 
 | Term | Meaning here |
 | --- | --- |
-| Consumer | A repository that installs Repo-Kit and declares its checks in `repo-kit.config.mjs`. |
+| Consumer | A repository that installs Package-Kit and declares its checks in `package-kit.config.mjs`. |
 | Step / check | One command from that configuration, with its dependencies, memory and timeout. |
 | Gate | A check whose result decides something: the pre-push gate, the release gate. |
 | Slot, lease | A unit of machine capacity and a running command's reservation of it, both from [Slotfather](https://github.com/maxvyshniakov/fathers/tree/main/slotfather). Without Slotfather nothing is leased. |
@@ -46,12 +46,12 @@ the [changelog](CHANGELOG.md). Use it as is, fork it, or borrow its ideas. Issue
 
 | Tool | Question it answers |
 | --- | --- |
-| **Repo-Kit** | Which checks run, did they pass, and is this exact package revision ready to publish? |
+| **Package-Kit** | Which checks run, did they pass, and is this exact package revision ready to publish? |
 | [**Lanefather**](https://github.com/maxvyshniakov/fathers/tree/main/lanefather) | Who owns this task's paths, what was verified, and can its branch be integrated and finished? |
 | [**Slotfather**](https://github.com/maxvyshniakov/fathers/tree/main/slotfather) | When may this expensive command use the shared machine, and how much capacity does it reserve? |
 
-Use Repo-Kit on its own for verification and releases. Add Slotfather when processes share a constrained machine;
-without it, Repo-Kit's commands run directly. Add Lanefather when coordinating parallel branches or agents.
+Use Package-Kit on its own for verification and releases. Add Slotfather when processes share a constrained machine;
+without it, Package-Kit's commands run directly. Add Lanefather when coordinating parallel branches or agents.
 A lane registration does not reserve machine capacity.
 
 ## Requirements and availability
@@ -74,28 +74,26 @@ when adopting a release.
 
 ## Install
 
-Add the scope to your project's `bunfig.toml`:
-
-```toml
-[install.scopes]
-maxvyshniakov = { url = "https://npm.pkg.github.com/", token = "$GITHUB_TOKEN" }
-```
-
-Then, with package access:
+Package-Kit is published to npmjs.org, with provenance; installing it needs no token:
 
 ```sh
-export GITHUB_TOKEN="$(gh auth token)"  # read:packages
-bun add --dev --exact @maxvyshniakov/repo-kit
+bun add --dev --exact @maxvyshniakov/package-kit
 ```
+
+Until 0.10.0 it was `@maxvyshniakov/repo-kit` on GitHub Packages. Moving from it: depend on
+`@maxvyshniakov/package-kit`, rename `repo-kit.config.mjs` to `package-kit.config.mjs` (and its imports), call
+`package-kit` and `package-kit-lane` instead of `repo-kit` and `repo-kit-lane`, rename `REPO_KIT_*` variables to
+`PACKAGE_KIT_*` (Lanefather: `slot_env = "PACKAGE_KIT_SLOT"`), point workflows at `maxvyshniakov/package-kit/...`,
+then run `package-kit hooks sync`. [CHANGELOG.md](CHANGELOG.md) lists every rename.
 
 An exact pin and lockfile keep older commits verifiable with the kit they used.
 To inspect or develop the tool from a source checkout:
 
 ```sh
-git clone https://github.com/maxvyshniakov/repo-kit.git
-cd repo-kit
+git clone https://github.com/maxvyshniakov/package-kit.git
+cd package-kit
 bun install
-bun run repo-kit help
+bun run package-kit help
 ```
 
 ## A minimal verification setup
@@ -106,12 +104,12 @@ Add scripts to your project's `package.json`:
 {
   "scripts": {
     "test": "node --test",
-    "verify": "repo-kit verify"
+    "verify": "package-kit verify"
   }
 }
 ```
 
-Create `repo-kit.config.mjs`:
+Create `package-kit.config.mjs`:
 
 ```js
 export default {
@@ -125,14 +123,14 @@ export default {
 
 Run `bun run verify`. Replace the example step with your actual test/build commands; add `needs` to order steps
 that consume another step's output, and `inputs` globs to run only the steps a change touches via
-`repo-kit verify --changed [--base REF] [--plan]` (and scoped Lanefather lane checks). Independent steps can run
+`package-kit verify --changed [--base REF] [--plan]` (and scoped Lanefather lane checks). Independent steps can run
 together when their declared memory fits. Output streams with step names, and a failed or timed-out command fails
 the run.
 
-Repo-Kit rejects a key it does not know, in the config or in a step, with its path and the nearest known key
+Package-Kit rejects a key it does not know, in the config or in a step, with its path and the nearest known key
 (`unknown key verify.stepTimout; did you mean verify.stepTimeout?`), so a typo fails instead of doing nothing.
 
-[Configuration and workspace examples](docs/reference.md#repo-kitconfigmjs) ·
+[Configuration and workspace examples](docs/reference.md#package-kitconfigmjs) ·
 [Change-aware selection and planning](docs/reference.md#change-aware-selection-and-planning) ·
 [Memory and worker budgets](docs/reference.md#step-memory)
 
@@ -141,19 +139,19 @@ Repo-Kit rejects a key it does not know, in the config or in a step, with its pa
 To adopt the managed hooks:
 
 ```sh
-bun run repo-kit hooks sync
-bun run repo-kit hooks install
+bun run package-kit hooks sync
+bun run package-kit hooks install
 ```
 
 Commit the generated files. The pre-push hook verifies outgoing commits rather than uncommitted local files.
 The managed `reference-transaction` hook also protects agent updates to `dev` and `main`: those updates use
 Lanefather's landing lock and `lanefather promote`. This is an opinionated branch policy; run verification directly
-or in CI if you only want the check runner. Repo-Kit's own repository uses a separate main-only publishing policy.
+or in CI if you only want the check runner. Package-Kit's own repository uses a separate main-only publishing policy.
 
 ## Changelog entries
 
 A commit that changes what a package ships must say so in its changelog. List the shipped paths in
-`repo-kit.config.mjs`:
+`package-kit.config.mjs`:
 
 ```js
 export default {
@@ -164,12 +162,12 @@ export default {
 Each commit touching those paths then adds, changes or removes a line under `## Unreleased` in that package's
 `CHANGELOG.md`, or ends its message with the trailer `Changelog: none`, optionally with a reason:
 `Changelog: none (tests only)`. One such trailer covers every package the commit changes.
-Merge commits and release commits (the version cut `repo-kit release` writes) are exempt. Without `changelog.paths`
+Merge commits and release commits (the version cut `package-kit release` writes) are exempt. Without `changelog.paths`
 nothing is checked.
 
-`repo-kit hooks sync` then also writes a managed `commit-msg` hook, which checks the commit being made; when it
+`package-kit hooks sync` then also writes a managed `commit-msg` hook, which checks the commit being made; when it
 cannot run the kit it warns and lets the commit through.
-`repo-kit check-changelog-entries origin/main..HEAD` checks every commit of a range, for a verify step or CI.
+`package-kit check-changelog-entries origin/main..HEAD` checks every commit of a range, for a verify step or CI.
 The check reads only Git: the same commits give the same answer everywhere.
 
 [Configuration, CI and an AGENTS.md paragraph](docs/reference.md#changelog-entries)
@@ -181,10 +179,10 @@ A consumer using parallel lanes supplies `.lanefather.toml` with its project ide
 ```toml
 [checks]
 verify = ".githooks/lane-check"
-slot_env = "REPO_KIT_SLOT"
+slot_env = "PACKAGE_KIT_SLOT"
 ```
 
-With a release containing `repo-kit-lane`, run `repo-kit hooks sync` and commit the managed entry. It prepares each
+With a release containing `package-kit-lane`, run `package-kit hooks sync` and commit the managed entry. It prepares each
 checkout's frozen dependencies, then runs that checkout's locked adapter. The first adapter version conservatively
 selects all configured normal and optional browser checks; no consumer-specific paths are built in.
 Lanefather records the receipt and handles integration, review and cleanup. A previously published task that never
@@ -196,17 +194,17 @@ went through lane landing still needs separate publication reconciliation.
 
 | Task | Command |
 | --- | --- |
-| Run normal checks | `repo-kit verify` |
-| Run configured browser checks | `repo-kit verify --browser` |
-| Check configuration, hooks and workflow pins | `repo-kit check` |
-| Validate the packed package in a consumer | `repo-kit packed-consumer` |
-| Check changelog entries of a commit range | `repo-kit check-changelog-entries <base>..<head>` |
-| Cut versions and changelogs | `repo-kit release` |
-| Verify an exact release revision | `repo-kit release-gate <ref>` |
-| Publish that verified revision | `repo-kit publish` |
-| Capture a catalog story | `repo-kit shoot` |
-| Keep fixed sleeps and timing asserts out of tests, shrink-only | `repo-kit test-hygiene` |
-| Record and rank agent friction with packages (deprecated: moving to Mastack) | `repo-kit friction log\|report\|export` |
+| Run normal checks | `package-kit verify` |
+| Run configured browser checks | `package-kit verify --browser` |
+| Check configuration, hooks and workflow pins | `package-kit check` |
+| Validate the packed package in a consumer | `package-kit packed-consumer` |
+| Check changelog entries of a commit range | `package-kit check-changelog-entries <base>..<head>` |
+| Cut versions and changelogs | `package-kit release` |
+| Verify an exact release revision | `package-kit release-gate <ref>` |
+| Publish that verified revision | `package-kit publish` |
+| Capture a catalog story | `package-kit shoot` |
+| Keep fixed sleeps and timing asserts out of tests, shrink-only | `package-kit test-hygiene` |
+| Record and rank agent friction with packages (deprecated: moving to Mastack) | `package-kit friction log\|report\|export` |
 
 [Full command reference](docs/reference.md#commands) · [Story screenshots](docs/reference.md#story-screenshots) · [Friction journal](docs/reference.md#friction-journal)
 
@@ -234,14 +232,14 @@ runner before anything is checked out:
 ```yaml
 jobs:
   check:
-    uses: maxvyshniakov/repo-kit/.github/workflows/verify.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v0.10.0
     permissions:
       contents: read
       packages: read
 ```
 
 The verification and browser jobs never hold more than `contents: read` and `packages: read`; only `release.yml`
-writes. Repo-Kit's own pull-request checks use GitHub-hosted runners. In a public repository, a pull request from a
+writes. Package-Kit's own pull-request checks use GitHub-hosted runners. In a public repository, a pull request from a
 fork runs the workflow files of that pull request, so it can choose any runner registered to the repository: do not
 register a self-hosted runner on a public repository, or require approval for every outside contributor's workflow
 runs. Before the heavy jobs, `verified-tree.yml` can look up a passed result for the same tree and plan (another branch,

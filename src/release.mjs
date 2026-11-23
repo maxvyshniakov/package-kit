@@ -1,11 +1,11 @@
 // Cuts package releases: moves each package's "## Unreleased" entries under a
 // new "## x.y.z - YYYY-MM-DD" heading and sets that version in package.json,
 // in bun.lock's workspace entry and in the quick start's archive names. Publish the pushed
-// release with `repo-kit publish`.
+// release with `package-kit publish`.
 //
-//   repo-kit release sid-kit:minor                 a package under packages/
-//   repo-kit release minor                         the only released package
-//   repo-kit release sid-kit:0.27.0 --date=2026-10-01
+//   package-kit release sid-kit:minor                 a package under packages/
+//   package-kit release minor                         the only released package
+//   package-kit release sid-kit:0.27.0 --date=2026-10-01
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

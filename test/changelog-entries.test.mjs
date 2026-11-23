@@ -37,7 +37,7 @@ const configText = (paths = PATHS, extra = "") => `export default { changelog: {
 const entry = text => fs.readFileSync(text, "utf8").replace("## Unreleased\n", "## Unreleased\n\n### Added\n\n- A new export.\n");
 
 /** A root-package repository with the guard configured, one commit in; `commit` writes files and commits them. */
-function guarded(files = rootPackageFiles({ "repo-kit.config.mjs": configText(), "src/index.mjs": "export {};\n" }), paths = PATHS) {
+function guarded(files = rootPackageFiles({ "package-kit.config.mjs": configText(), "src/index.mjs": "export {};\n" }), paths = PATHS) {
   const repository = tempRepository(files, { git: true });
   const config = withDefaults({ changelog: { paths } });
   config.root = repository.root;
@@ -147,7 +147,7 @@ test("merge commits and release commits are exempt; a bare version bump is not",
     assert.equal(merged.result, 0, merged.output);
     assert.match(merged.output, /2 commits checked, 1 merge exempt/);
 
-    // `repo-kit release` moves Unreleased under 0.3.0 and sets package.json (a shipped path).
+    // `package-kit release` moves Unreleased under 0.3.0 and sets package.json (a shipped path).
     await quiet(() => runRelease(repo.config, ["minor", "--date=2026-11-11"])).result;
     repo.commit({}, "Release 0.3.0");
     assert.equal(repo.check().result, 0, repo.check().output);
@@ -161,7 +161,7 @@ test("merge commits and release commits are exempt; a bare version bump is not",
 
 test("the guard applies to a workspace package's CHANGELOG.md", () => {
   const workspace = guarded(workspaceFiles({
-    "repo-kit.config.mjs": configText(["packages/example/src/**"]),
+    "package-kit.config.mjs": configText(["packages/example/src/**"]),
     "packages/example/src/index.mjs": "export {};\n",
   }), ["packages/example/src/**"]);
   try {
@@ -192,7 +192,7 @@ test("without changelog.paths the check is off, and a range outside the checkout
 test("hooks sync writes commit-msg with changelog.paths, hooks.managed narrows the set, and a repository's own commit-msg stays", () => {
   assert.equal(managedHooks()["commit-msg"], undefined);
   assert.match(managedHooks({ commitMsg: true })["commit-msg"], /exec node "\$cli" commit-msg "\$@"/);
-  assert.match(managedHooks({ commitMsg: true })["commit-msg"], /command -v repo-kit/);
+  assert.match(managedHooks({ commitMsg: true })["commit-msg"], /command -v package-kit/);
   assert.deepEqual(Object.keys(managedHooks({ commitMsg: true, only: ["commit-msg"] })), ["commit-msg"]);
   assert.throws(() => managedHooks({ only: ["pre-commit"] }), /hooks.managed: expected a list of/);
 
@@ -203,6 +203,10 @@ test("hooks sync writes commit-msg with changelog.paths, hooks.managed narrows t
     quiet(() => syncHooks(repository.root, config));
     assert.deepEqual(fs.readdirSync(path.join(repository.root, ".githooks")), ["commit-msg"]);
     assert.deepEqual(hookIssues(repository.root, config), []);
+    // A hook the kit wrote before the rename from repo-kit is still the kit's to replace.
+    fs.writeFileSync(path.join(repository.root, ".githooks/commit-msg"), "#!/bin/sh\n# Managed by @maxvyshniakov/repo-kit (repo-kit hooks sync); do not edit.\nexit 0\n");
+    quiet(() => syncHooks(repository.root, config));
+    assert.deepEqual(hookIssues(repository.root, config), []);
     fs.writeFileSync(path.join(repository.root, ".githooks/commit-msg"), "#!/bin/sh\nexit 0\n");
     assert.throws(() => syncHooks(repository.root, config), /commit-msg is the repository's own/);
   } finally {
@@ -212,11 +216,11 @@ test("hooks sync writes commit-msg with changelog.paths, hooks.managed narrows t
 
 test("the commit-msg hook checks the commit being made, including -a, amends and merges", () => {
   // Only commit-msg: the managed reference-transaction would refuse commits on dev.
-  const repo = guarded(rootPackageFiles({ "repo-kit.config.mjs": configText(PATHS, ', hooks: { managed: ["commit-msg"] }'), "src/index.mjs": "export {};\n" }));
+  const repo = guarded(rootPackageFiles({ "package-kit.config.mjs": configText(PATHS, ', hooks: { managed: ["commit-msg"] }'), "src/index.mjs": "export {};\n" }));
   try {
     quiet(() => syncHooks(repo.root, { ...repo.config, hooks: { managed: ["commit-msg"] } }));
     fs.mkdirSync(path.join(repo.root, "node_modules/@maxvyshniakov"), { recursive: true });
-    fs.symlinkSync(kitRoot, path.join(repo.root, "node_modules/@maxvyshniakov/repo-kit"));
+    fs.symlinkSync(kitRoot, path.join(repo.root, "node_modules/@maxvyshniakov/package-kit"));
     fs.writeFileSync(path.join(repo.root, ".gitignore"), "node_modules/\n");
     repo.git("add", "-A");
     repo.git("commit", "--quiet", "--no-verify", "-m", "Hooks");
@@ -258,9 +262,9 @@ test("the commit-msg hook checks the commit being made, including -a, amends and
   }
 });
 
-test("in a repository without node_modules the commit-msg hook runs the repo-kit on PATH", () => {
+test("in a repository without node_modules the commit-msg hook runs the package-kit on PATH", () => {
   const repository = guarded(rootPackageFiles({
-    "repo-kit.config.mjs": configText(["src/**"], ', hooks: { managed: ["commit-msg"] }'),
+    "package-kit.config.mjs": configText(["src/**"], ', hooks: { managed: ["commit-msg"] }'),
     "src/index.mjs": "export {};\n",
   }), ["src/**"]);
   try {
@@ -268,7 +272,7 @@ test("in a repository without node_modules the commit-msg hook runs the repo-kit
     repository.git("config", "core.hooksPath", ".githooks");
     const bin = path.join(repository.root, ".bin");
     fs.mkdirSync(bin);
-    fs.symlinkSync(path.join(kitRoot, "src/cli.mjs"), path.join(bin, "repo-kit"));
+    fs.symlinkSync(path.join(kitRoot, "src/cli.mjs"), path.join(bin, "package-kit"));
     fs.writeFileSync(path.join(repository.root, ".gitignore"), ".bin/\n");
     fs.writeFileSync(path.join(repository.root, "src/index.mjs"), "export const a = 1;\n");
     repository.git("add", "-A");
@@ -276,7 +280,7 @@ test("in a repository without node_modules the commit-msg hook runs the repo-kit
     // Without a kit to run, the hook warns and lets the commit through; CI's range check still runs.
     const missing = commit({ ...repository.env, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` });
     assert.equal(missing.status, 0, missing.stderr);
-    assert.match(missing.stderr, /commit-msg: warning: repo-kit is not installed; run bun install, or put repo-kit on PATH\. The changelog-entry check did not run/);
+    assert.match(missing.stderr, /commit-msg: warning: package-kit is not installed; run bun install, or put package-kit on PATH\. The changelog-entry check did not run/);
     repository.git("reset", "--quiet", "--soft", "HEAD~1");
     const refused = commit({ ...repository.env, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` });
     assert.equal(refused.status, 1, refused.stderr);
@@ -288,10 +292,10 @@ test("in a repository without node_modules the commit-msg hook runs the repo-kit
 
 /** A guarded root package with the commit-msg hook active and the kit linked into node_modules. */
 function hooked(kit = kitRoot) {
-  const repo = guarded(rootPackageFiles({ "repo-kit.config.mjs": configText(PATHS, ', hooks: { managed: ["commit-msg"] }'), "src/index.mjs": "export {};\n" }));
+  const repo = guarded(rootPackageFiles({ "package-kit.config.mjs": configText(PATHS, ', hooks: { managed: ["commit-msg"] }'), "src/index.mjs": "export {};\n" }));
   quiet(() => syncHooks(repo.root, { ...repo.config, hooks: { managed: ["commit-msg"] } }));
   fs.mkdirSync(path.join(repo.root, "node_modules/@maxvyshniakov"), { recursive: true });
-  fs.symlinkSync(kit, path.join(repo.root, "node_modules/@maxvyshniakov/repo-kit"));
+  fs.symlinkSync(kit, path.join(repo.root, "node_modules/@maxvyshniakov/package-kit"));
   fs.writeFileSync(path.join(repo.root, ".gitignore"), "node_modules/\n.bin/\n");
   repo.git("add", "-A");
   repo.git("commit", "--quiet", "--no-verify", "-m", "Hooks");
@@ -303,7 +307,7 @@ function hooked(kit = kitRoot) {
 
 test("the commit-msg hook fails open, with a warning, when node is missing or the kit has no commit-msg", () => {
   const repo = hooked();
-  const old = tempRepository({ "src/cli.mjs": "console.log('Usage: repo-kit <command>\\n  verify');\nprocess.exitCode = 1;\n" });
+  const old = tempRepository({ "src/cli.mjs": "console.log('Usage: package-kit <command>\\n  verify');\nprocess.exitCode = 1;\n" });
   const oldRepo = hooked(old.root);
   try {
     // A GUI client's PATH without node: only git and the system tools.
@@ -319,7 +323,7 @@ test("the commit-msg hook fails open, with a warning, when node is missing or th
     oldRepo.write("src/index.mjs", "export const a = 1;\n");
     const outdated = oldRepo.commit("-a", "-m", "Add a");
     assert.equal(outdated.status, 0, outdated.stderr);
-    assert.match(outdated.stderr, /commit-msg: warning: this repo-kit has no commit-msg command; install repo-kit 0\.5\.0 or newer\./);
+    assert.match(outdated.stderr, /commit-msg: warning: this package-kit has no commit-msg command; update package-kit\./);
   } finally {
     repo.cleanup();
     oldRepo.cleanup();
@@ -390,7 +394,7 @@ test("character classes and ** inside braces are configuration errors", () => {
 });
 
 test("check-changelog-entries warns about a glob that matches no tracked file", () => {
-  const repo = guarded(rootPackageFiles({ "repo-kit.config.mjs": configText(["src", "lib/**"]), "src/index.mjs": "export {};\n" }), ["src", "lib/**"]);
+  const repo = guarded(rootPackageFiles({ "package-kit.config.mjs": configText(["src", "lib/**"]), "src/index.mjs": "export {};\n" }), ["src", "lib/**"]);
   try {
     repo.commit({ "README.md": "# Example\n" }, "Readme");
     const { result, output } = repo.check();
@@ -403,7 +407,7 @@ test("check-changelog-entries warns about a glob that matches no tracked file", 
 });
 
 test("one Changelog: none trailer exempts every package a commit changes", () => {
-  const files = workspaceFiles({ "repo-kit.config.mjs": configText(["packages/a/src/**", "packages/b/src/**"]) });
+  const files = workspaceFiles({ "package-kit.config.mjs": configText(["packages/a/src/**", "packages/b/src/**"]) });
   delete files["packages/example/package.json"];
   delete files["packages/example/CHANGELOG.md"];
   for (const name of ["a", "b"]) {

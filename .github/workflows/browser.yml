@@ -7,7 +7,7 @@
 #
 #   jobs:
 #     browser:
-#       uses: maxvyshniakov/repo-kit/.github/workflows/browser.yml@v0.10.0
+#       uses: maxvyshniakov/package-kit/.github/workflows/browser.yml@v0.10.0
 #       with:
 #         checks: >-
 #           [{"name": "stories", "run": "bun run check:stories -- --no-build"}]
@@ -69,7 +69,7 @@ jobs:
     env:
       STORYBOOK_DISABLE_TELEMETRY: "1"
       GITHUB_TOKEN: ${{ github.token }}
-      REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
+      PACKAGE_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
     steps:
       - name: Refuse a self-hosted runner in a public repository
         if: ${{ github.event.repository.visibility == 'public' && contains(inputs.runner, 'self-hosted') }}
@@ -84,22 +84,22 @@ jobs:
       - if: inputs.verified-url == ''
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - if: inputs.verified-url == ''
-        uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.10.0
+        uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0
       # The runner must provide Chromium's system libraries; a persistent
       # self-hosted runner keeps downloaded browsers per Playwright version.
       - if: inputs.playwright && inputs.verified-url == ''
         run: bunx playwright install --no-shell chromium
       # The build and the checks run under one lease, so the build queues with
-      # the runner's other jobs too; a check that leases again (repo-kit heavy)
+      # the runner's other jobs too; a check that leases again (package-kit heavy)
       # runs inside it.
       - if: inputs.verified-url == ''
-        run: node_modules/.bin/repo-kit heavy "$SLOTS" sh -c 'eval "$BUILD" && node_modules/.bin/repo-kit checks'
+        run: node_modules/.bin/package-kit heavy "$SLOTS" sh -c 'eval "$BUILD" && node_modules/.bin/package-kit checks'
         env:
           SLOTS: ${{ inputs.slots }}
           BUILD: ${{ inputs.build }}
-          REPO_KIT_CHECKS: ${{ inputs.checks }}
+          PACKAGE_KIT_CHECKS: ${{ inputs.checks }}
           # Per-check timings as JUnit, uploaded with the caller's reports.
-          REPO_KIT_CHECKS_JUNIT: ${{ inputs.junit != '' && 'repo-kit-junit/checks.xml' || '' }}
+          PACKAGE_KIT_CHECKS_JUNIT: ${{ inputs.junit != '' && 'package-kit-junit/checks.xml' || '' }}
       - name: Upload JUnit reports
         if: ${{ always() && inputs.junit != '' && inputs.verified-url == '' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -107,6 +107,6 @@ jobs:
           name: ${{ inputs.junit-artifact || format('junit-{0}-{1}', github.job, github.run_attempt) }}
           path: |
             ${{ inputs.junit }}
-            repo-kit-junit/
+            package-kit-junit/
           if-no-files-found: warn
           retention-days: 30

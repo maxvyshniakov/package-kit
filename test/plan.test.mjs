@@ -144,8 +144,8 @@ test("planChecks falls back to full when an unowned path changes, and supports r
   // Runner path with canary runs canary instead of full.
   const canaryPlan = planChecks({
     checks,
-    paths: ["repo-kit.config.mjs"],
-    runner: ["repo-kit.config.mjs"],
+    paths: ["package-kit.config.mjs"],
+    runner: ["package-kit.config.mjs"],
     canary: ["unit"],
   });
   assert.equal(canaryPlan.full, false);
@@ -356,7 +356,7 @@ test("runSteps yields between checks when SLOTFATHER_YIELD is requested and stop
 });
 
 test("heavy yield helpers check SLOTFATHER_YIELD, strip it for children, report lease loss, and forward abort", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-yield-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-yield-"));
   try {
     const marker = path.join(dir, "yield-req");
     assert.equal(yieldRequested({ SLOTFATHER_YIELD: marker }), false);
@@ -405,14 +405,14 @@ test("heavy yield helpers check SLOTFATHER_YIELD, strip it for children, report 
   }
 });
 
-test("repo-kit verify --changed --plan and verified-tree reuse work end to end", () => {
+test("package-kit verify --changed --plan and verified-tree reuse work end to end", () => {
   const repo = tempRepository({
     "package.json": { name: "plan-e2e", type: "module" },
     ".gitignore": "ran-*\n",
     "packages/a/index.js": "export const a = 1;\n",
     "packages/b/index.js": "export const b = 1;\n",
     "README.md": "hello\n",
-    "repo-kit.config.mjs": `export default {
+    "package-kit.config.mjs": `export default {
       verify: {
         inert: ["**/*.md"],
         steps: [
@@ -475,13 +475,13 @@ test("repo-kit verify --changed --plan and verified-tree reuse work end to end",
   }
 });
 
-test("repo-kit-lane returns scoped plans, unowned fallback, and narrow --smoke plans", () => {
+test("package-kit-lane returns scoped plans, unowned fallback, and narrow --smoke plans", () => {
   const repo = tempRepository({
     "package.json": { name: "lane-plan-fixture", type: "module" },
     "packages/a/src.js": "export const a = 1;\n",
     "packages/b/src.js": "export const b = 1;\n",
     "unowned.txt": "x\n",
-    "repo-kit.config.mjs": `export default {
+    "package-kit.config.mjs": `export default {
       verify: {
         inert: ["**/*.md"],
         smoke: ({ plan }) => ["verify:hygiene", ...plan.checks.filter(r => r.suite === "browser" && !r.producer).map(r => r.id)],
@@ -602,7 +602,7 @@ test("unowned fallback and forceFull mark every check producer: false, preservin
 
   // Unknown check in verify.canary throws; cyclic needs do not stack-overflow.
   assert.throws(
-    () => planChecks({ checks, paths: ["repo-kit.config.mjs"], runner: ["repo-kit.config.mjs"], canary: ["nonexistent"] }),
+    () => planChecks({ checks, paths: ["package-kit.config.mjs"], runner: ["package-kit.config.mjs"], canary: ["nonexistent"] }),
     /verify\.canary references unknown check "nonexistent"/,
   );
   const cyclic = [
@@ -619,7 +619,7 @@ test("verify --changed plans across both steps and browser suites so cross-suite
     ".gitignore": "ran-*\n",
     "src/index.js": "export const x = 1;\n",
     "stories/Button.stories.js": "export const story = 1;\n",
-    "repo-kit.config.mjs": `export default {
+    "package-kit.config.mjs": `export default {
       verify: {
         steps: [
           { name: "unit", inputs: ["src/**"], command: ["-e", "require('fs').appendFileSync('ran-unit', 'x')"] },
@@ -678,7 +678,7 @@ test("tree cache uses lock-free per-key marker files and SID_KIT_SOURCE bypasses
     "package.json": { name: "marker-cache-e2e", type: "module" },
     ".gitignore": "ran-*\n",
     "src/index.js": "export const x = 1;\n",
-    "repo-kit.config.mjs": `export default {
+    "package-kit.config.mjs": `export default {
       verify: {
         steps: [
           { name: "unit", inputs: ["src/**"], command: ["-e", "require('fs').appendFileSync('ran-unit', 'x')"] },
@@ -744,13 +744,13 @@ test("changedPaths handles renames, deletions, untracked files, and spaces", () 
   }
 });
 
-test("repo-kit-lane supports --checks with/without --base, ordering barrier reuse, reused:true, and --no-reuse (P2 #5, #6)", () => {
+test("package-kit-lane supports --checks with/without --base, ordering barrier reuse, reused:true, and --no-reuse (P2 #5, #6)", () => {
   const repo = tempRepository({
     "package.json": { name: "lane-e2e", type: "module" },
     ".gitignore": "ran-*\nargs-*\n",
     "packages/a/index.js": "export const a = 1;\n",
     "packages/b/index.js": "export const b = 1;\n",
-    "repo-kit.config.mjs": `export default {
+    "package-kit.config.mjs": `export default {
       verify: {
         steps: [
           { name: "lint", always: true, command: ["-e", "require('fs').appendFileSync('ran-lint', 'x')"] },

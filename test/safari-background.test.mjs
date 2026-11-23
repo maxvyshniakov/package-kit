@@ -185,7 +185,7 @@ test('shared Safari lock enforces mutual exclusion, reclaims dead owners and rem
   const os = await import('node:os');
   const path = await import('node:path');
   const { acquireLock } = await import('../src/safari-background/lock.mjs');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-kit-lock-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lock-'));
   const lockPath = path.join(dir, 'stp.lock');
   try {
     const first = acquireLock(lockPath, { pid: 1001, isAlive: pid => pid === 1001 });

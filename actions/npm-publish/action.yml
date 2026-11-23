@@ -1,7 +1,7 @@
 name: Publish to npmjs.org
 description: >-
   Installs Node and npm 11.5.1 or newer, the first with trusted publishing, then
-  runs the publish command (repo-kit publish with publish.registry "npm"). Run it
+  runs the publish command (package-kit publish with publish.registry "npm"). Run it
   after actions/checkout and actions/setup-bun, in a job that grants
   id-token: write (OIDC for trusted publishing and provenance) and
   contents: write (the release tag).
@@ -9,6 +9,9 @@ inputs:
   command:
     description: The publish command.
     default: bun run release:publish
+  kit:
+    description: The package-kit executable that leases the publication; package-kit's own repository passes src/cli.mjs.
+    default: node_modules/.bin/package-kit
   node-version:
     description: Node to install.
     default: "24"
@@ -43,11 +46,16 @@ runs:
           exit 1
         fi
     # Publishing builds the package (prepack): it runs under a lease, like every
-    # heavy job of the reusable workflows.
+    # heavy job of the reusable workflows. Default Git committer identity for
+    # `git tag --annotate` on GitHub-hosted runners where user.name/email are unset.
     - shell: bash
-      run: node_modules/.bin/repo-kit heavy "$SLOTS" sh -c 'eval "$COMMAND"'
+      run: |
+        export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-github-actions[bot]}"
+        export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
+        exec "$KIT" heavy "$SLOTS" sh -c 'eval "$COMMAND"'
       env:
         COMMAND: ${{ inputs.command }}
+        KIT: ${{ inputs.kit }}
         GITHUB_TOKEN: ${{ inputs.token }}
         SLOTS: ${{ inputs.slots }}
-        REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}
+        PACKAGE_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}

@@ -66,8 +66,8 @@ export function verifyCommand(worktree, release = false) {
 /**
  * The commands that verify a checked-out commit: `{ release, browser }` as
  * `[file, args]`, `browser` undefined when it declares no browser checks.
- * A commit from before the repository took its gate from repo-kit has no
- * repo-kit.config.mjs; its own verify and verify:browser scripts run.
+ * A commit from before the repository took its gate from package-kit has no
+ * package-kit.config.mjs; its own verify and verify:browser scripts run.
  */
 export async function verifyCommands(worktree) {
   const scripts = readPackageScripts(worktree);
@@ -85,7 +85,7 @@ export async function verifyCommands(worktree) {
  * and always removes the worktree and directory afterward. Works with both
  * synchronous and async `run` callbacks.
  */
-export function withCommitWorktree(root, sha, run, { prefix = "repo-kit-check-", env = cleanEnvironment() } = {}) {
+export function withCommitWorktree(root, sha, run, { prefix = "package-kit-check-", env = cleanEnvironment() } = {}) {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const cleanup = () => {
     spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: root, env, stdio: "ignore" });

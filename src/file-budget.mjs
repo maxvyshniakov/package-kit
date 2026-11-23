@@ -1,12 +1,12 @@
-// `repo-kit check file-budget` / `repo-kit file-budget`: one configurable
-// file-size ratchet for every consumer (maxvyshniakov/repo-kit#6).
+// `package-kit check file-budget` / `package-kit file-budget`: one configurable
+// file-size ratchet for every consumer (maxvyshniakov/package-kit#6).
 //
 //   - Per-glob budgets, in lines or bytes (`rules: [{ glob, lines } | { glob, bytes }]`,
 //     plus optional top-level `lines` or `bytes` fallback / shorthand).
 //   - A ratchet allowlist that may only shrink: a listed file may not grow past
 //     its recorded size, a shrunken file must lower its entry (`--update`), and
 //     an entry is removed once the file fits or no longer exists. Compared with
-//     the base commit (`REPO_KIT_FILE_BUDGET_BASE`, `HEAD` when `--staged`, or
+//     the base commit (`PACKAGE_KIT_FILE_BUDGET_BASE`, `HEAD` when `--staged`, or
 //     where `HEAD` left `origin/main` / `origin/HEAD`), no entry may rise and
 //     no new file may be added without `--init`.
 //   - Generated and vendored paths are excluded by config (`exclude`, `!` globs,
@@ -48,7 +48,7 @@ export const LOCKFILE_NAMES = new Set([
 
 const CHANGELOG_NAME = /^changelog(?:\.(?:md|markdown|mdx|rst|txt|adoc))?$/i;
 
-export const USAGE = "Usage: repo-kit file-budget [--staged] [--all] [--init|--update] [--json]";
+export const USAGE = "Usage: package-kit file-budget [--staged] [--all] [--init|--update] [--json]";
 
 /** Number of lines in `buffer`, counting a final line without a trailing newline. */
 export function countLines(buffer) {
@@ -360,7 +360,7 @@ function git(root, args, { env = process.env, input, encoding = "utf8" } = {}) {
 /**
  * Base commit whose allowlist may not be exceeded:
  * - In `--staged` mode, `HEAD` (the commit being built upon).
- * - Otherwise `REPO_KIT_FILE_BUDGET_BASE`, or where `HEAD` left `origin/HEAD`
+ * - Otherwise `PACKAGE_KIT_FILE_BUDGET_BASE`, or where `HEAD` left `origin/HEAD`
  *   or `origin/main` (or `HEAD~1` on that branch itself), or `HEAD`.
  */
 export function baseCommit(root, { staged = false, env = process.env } = {}) {
@@ -371,8 +371,8 @@ export function baseCommit(root, { staged = false, env = process.env } = {}) {
       return null;
     }
   };
-  if (env.REPO_KIT_FILE_BUDGET_BASE) {
-    return tryGit(["rev-parse", "--verify", `${env.REPO_KIT_FILE_BUDGET_BASE}^{commit}`]);
+  if (env.PACKAGE_KIT_FILE_BUDGET_BASE) {
+    return tryGit(["rev-parse", "--verify", `${env.PACKAGE_KIT_FILE_BUDGET_BASE}^{commit}`]);
   }
   const head = tryGit(["rev-parse", "--verify", "HEAD"]);
   if (!head) return null;
@@ -862,7 +862,7 @@ export function runFileBudget({
 
   const allProblems = [
     ...report.problems,
-    ...report.stale.map(item => `${item.message} (or run repo-kit file-budget --update)`),
+    ...report.stale.map(item => `${item.message} (or run package-kit file-budget --update)`),
   ];
 
   if (options.json) {

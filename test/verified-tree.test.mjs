@@ -66,7 +66,7 @@ const platform = "linux-x64";
 
 test("plans are a JSON object of names to accepted check names or status contexts", () => {
   assert.deepEqual(parsePlans('{"verify": ["check / verify"]}'), { verify: ["check / verify"] });
-  assert.throws(() => parsePlans(""), /REPO_KIT_PLANS/);
+  assert.throws(() => parsePlans(""), /PACKAGE_KIT_PLANS/);
   assert.throws(() => parsePlans("[]"), /object/);
   assert.throws(() => parsePlans('{"verify": []}'), /verify/);
   assert.throws(() => parsePlans('{"verify": "check / verify"}'), /verify/);
@@ -211,7 +211,7 @@ test("a tree is verified only for the platform it was checked on: a Mac result n
     ["Library checks (local, linux-x64)", "linux-x64", true],
     ["verified-tree/linux-x64", "linux-x64", true],
     ["verified-tree/linux-x64", "darwin-arm64", false],
-    // The deprecated context of repo-kit 0.6.0 and older (the gate still writes it beside the new one until the
+    // The deprecated context of package-kit 0.6.0 and older (the gate still writes it beside the new one until the
     // next batched minor) names the OS only: it counts for that OS on any architecture.
     ["Library checks (local, macOS)", "darwin-arm64", true],
     ["Library checks (local, macOS)", "darwin-x64", true],
@@ -304,7 +304,7 @@ function actionEnv(extra = {}) {
     GITHUB_OUTPUT: path.join(dir, "output"), GITHUB_STEP_SUMMARY: path.join(dir, "summary"),
     GITHUB_REPOSITORY: REPO, GITHUB_SHA: sha("a"), GITHUB_TOKEN: "token",
     GITHUB_WORKFLOW_REF: `${REPO}/.github/workflows/check.yml@refs/heads/main`, GITHUB_REF: "refs/heads/main",
-    REPO_KIT_PLANS: JSON.stringify(plans), REPO_KIT_BRANCHES: '["main", "dev"]', ...extra,
+    PACKAGE_KIT_PLANS: JSON.stringify(plans), PACKAGE_KIT_BRANCHES: '["main", "dev"]', ...extra,
   };
 }
 
@@ -334,7 +334,7 @@ test("when GitHub cannot answer, every plan runs: the lookup never fails a workf
 });
 
 test("bad plans fail the step: a typo must not silently run or skip", async () => {
-  const env = actionEnv({ REPO_KIT_PLANS: "{" });
+  const env = actionEnv({ PACKAGE_KIT_PLANS: "{" });
   assert.equal(await runVerifiedTree(env, async () => assert.fail("no request")), 1);
 });
 
@@ -371,24 +371,24 @@ test("outside a release-mode run, only results without --release count", async (
   assert.ok(result.plans.verify);
 });
 
-test("REPO_KIT_PLATFORM names the platform the checks run on, and a malformed one fails the step", async () => {
+test("PACKAGE_KIT_PLATFORM names the platform the checks run on, and a malformed one fails the step", async () => {
   const { fetcher } = github({
     commits: { [sha("a")]: TREE, [sha("b")]: TREE },
     branches: { main: [sha("a")], dev: [sha("b")] },
     statuses: { [sha("b")]: [{ context: "Library checks (local, darwin-arm64)", state: "success", target_url: "gate" }] },
   });
-  const linux = actionEnv({ REPO_KIT_PLATFORM: "linux-x64" });
+  const linux = actionEnv({ PACKAGE_KIT_PLATFORM: "linux-x64" });
   assert.equal(await runVerifiedTree(linux, fetcher), 0);
   assert.deepEqual(JSON.parse(outputs(linux).urls), { verify: "", browser: "" });
   assert.equal(outputs(linux).platform, "linux-x64");
-  const mac = actionEnv({ REPO_KIT_PLATFORM: "darwin-arm64" });
+  const mac = actionEnv({ PACKAGE_KIT_PLATFORM: "darwin-arm64" });
   assert.equal(await runVerifiedTree(mac, fetcher), 0);
   assert.equal(JSON.parse(outputs(mac).urls).verify, "gate");
-  assert.equal(await runVerifiedTree(actionEnv({ REPO_KIT_PLATFORM: "Linux" }), async () => assert.fail("no request")), 1);
+  assert.equal(await runVerifiedTree(actionEnv({ PACKAGE_KIT_PLATFORM: "Linux" }), async () => assert.fail("no request")), 1);
 });
 
 test("force runs every plan without asking GitHub", async () => {
-  const env = actionEnv({ REPO_KIT_FORCE: "true" });
+  const env = actionEnv({ PACKAGE_KIT_FORCE: "true" });
   assert.equal(await runVerifiedTree(env, async () => assert.fail("no request")), 0);
   assert.deepEqual(JSON.parse(outputs(env).urls), { verify: "", browser: "" });
   assert.match(fs.readFileSync(env.GITHUB_STEP_SUMMARY, "utf8"), /forced: every plan runs/);

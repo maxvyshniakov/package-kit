@@ -10,12 +10,12 @@
 //     with skipLibCheck disabled.
 // Then it runs the repository's probes (server rendering, a bundler build, ...).
 //
-//   repo-kit packed-consumer [--keep]   run `bun run build` first; --keep prints the project's path
+//   package-kit packed-consumer [--keep]   run `bun run build` first; --keep prints the project's path
 //
 // `publish` passes `tarballs`, the archives it is about to upload, so the
 // check covers those exact bytes instead of packing again.
 //
-// repo-kit.config.mjs:
+// package-kit.config.mjs:
 //   packedConsumer: {
 //     versionSources: ["package.json", "apps/storybook/package.json"], // where exact versions are pinned
 //     dependencies: ["vite"], devDependencies: ["@types/node"],     // more consumer packages, at their pins
@@ -76,7 +76,7 @@ export function tarballIssues({ manifest, packedManifest, files }) {
  * The peers a consumer installs beside the archives: every required peer the
  * manifests declare, and each optional one the repository pins (an entry may
  * import it, a declaration may name it). An optional peer with no version in
- * the repository is left out: repo-kit's own Playwright, which only `repo-kit
+ * the repository is left out: package-kit's own Playwright, which only `package-kit
  * shoot` loads, from the repository using it. `pinned(name)` throws when no
  * version is declared; without it every optional peer is left out.
  */
@@ -180,7 +180,7 @@ export async function runPackedConsumer(config, { keep = false, args = [], tarba
     .map(file => readJson(path.join(root, file)));
   const pinned = pinnedVersions(sources);
 
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-consumer-"));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-consumer-"));
   const tarballDir = path.join(workDir, "tarballs");
   const consumerDir = path.join(workDir, "consumer");
   fs.mkdirSync(tarballDir);

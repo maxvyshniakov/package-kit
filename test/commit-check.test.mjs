@@ -85,8 +85,8 @@ test("withCommitWorktree checks out an exact commit and always cleans up for syn
 
 test("verifyCommands resolves release and browser commands for modern, historical, and minimal commits", async () => {
   const modern = tempRepository({
-    "package.json": { scripts: { verify: "repo-kit verify" } },
-    "repo-kit.config.mjs": "export default { verify: { steps: () => [], browser: () => [] } };\n",
+    "package.json": { scripts: { verify: "package-kit verify" } },
+    "package-kit.config.mjs": "export default { verify: { steps: () => [], browser: () => [] } };\n",
   });
   const historical = tempRepository({
     "package.json": { scripts: { verify: "node scripts/verify.mjs", "verify:browser": "node scripts/verify.mjs --browser" } },
@@ -117,17 +117,17 @@ test("verifyCommands resolves release and browser commands for modern, historica
 test("passedRecord supports both pre-push legacy files and release-gate duration entries", () => {
   const repository = tempRepository({
     "sid-kit-verified": "aaaa release\n",
-    "repo-kit-verified": "bbbb\n",
+    "package-kit-verified": "bbbb\n",
   });
   try {
-    const prePush = passedRecord(repository.root, "repo-kit-verified", { legacy: ["sid-kit-verified"] });
+    const prePush = passedRecord(repository.root, "package-kit-verified", { legacy: ["sid-kit-verified"] });
     assert.equal(prePush.has("aaaa release"), true);
     assert.equal(prePush.has("bbbb"), true);
     prePush.add("cccc release");
     assert.equal(prePush.has("cccc release"), true);
-    assert.match(fs.readFileSync(path.join(repository.root, "repo-kit-verified"), "utf8"), /cccc release\n$/);
+    assert.match(fs.readFileSync(path.join(repository.root, "package-kit-verified"), "utf8"), /cccc release\n$/);
 
-    const gateDir = path.join(repository.root, "repo-kit-gate");
+    const gateDir = path.join(repository.root, "package-kit-gate");
     const gate = passedRecord(gateDir, "passed", {
       parse: line => {
         const [sha, seconds] = line.split(" ");

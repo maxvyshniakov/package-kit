@@ -1,0 +1,49 @@
+# package-kit's own publication to npmjs.org, with npm trusted publishing
+# (OIDC) and provenance: docs/templates/release-npm.yml, run from this commit's
+# sources and actions (./actions/...) rather than a released tag, as check.yml
+# is, so a release commit publishes with the kit it releases.
+#
+# - Release: cut the version, push main, then
+#   gh workflow run release-npm.yml --repo maxvyshniakov/package-kit --ref main
+# - npmjs.org trusts this file once, by name (the owner's step):
+#   npm trust github @maxvyshniakov/package-kit --file release-npm.yml --repo maxvyshniakov/package-kit
+# - Inside Actions, `package-kit publish` skips the release gate's own wait: the
+#   check job below, `verify --release`, gates the publication.
+# - Only the publishing job gets id-token: write and contents: write (the tag).
+name: Release to npm
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: ./actions/setup-bun
+      - run: bun run verify -- --release
+  publish:
+    needs: [check]
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: ./actions/setup-bun
+      # package-kit is not in its own node_modules: lease the publication with the sources.
+      - uses: ./actions/npm-publish
+        with:
+          kit: src/cli.mjs

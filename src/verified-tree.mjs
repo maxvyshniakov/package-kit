@@ -1,4 +1,4 @@
-// `repo-kit verified-tree`, and the actions/verified-tree step: has this tree
+// `package-kit verified-tree`, and the actions/verified-tree step: has this tree
 // already passed these checks anywhere? A check result belongs to a tree and a
 // plan, not to a branch or a commit. The tree is `git rev-parse <sha>^{tree}`:
 // it holds the workflow files, the kit's configuration and the lockfile, so
@@ -22,11 +22,11 @@
 // as verified only for the OS and architecture it was checked on, so a green
 // local gate on the Mac never skips the Linux run, while a second run on the
 // same platform is skipped. The platform is `<os>-<arch>` in Node's names
-// (darwin-arm64, linux-x64): REPO_KIT_PLATFORM, or the lookup runner's own. A
+// (darwin-arm64, linux-x64): PACKAGE_KIT_PLATFORM, or the lookup runner's own. A
 // commit status counts only when its context ends with that platform, after a
 // slash (`verified-tree/linux-x64`) or in the local gate's parentheses
 // (`Library checks (local, linux-x64)`). The deprecated gate context of
-// repo-kit 0.6.0 and older, `Library checks (local, macOS)` (Linux, Windows),
+// package-kit 0.6.0 and older, `Library checks (local, macOS)` (Linux, Windows),
 // names the OS only and counts for it on any architecture (`darwin-*`); the gate
 // writes it beside the new one until the next batched minor. A context naming
 // none counts for no platform. A
@@ -37,7 +37,7 @@
 // It runs with Node alone, so the action needs neither a checkout nor an
 // install: it reads GitHub's API with the workflow token (contents, checks,
 // statuses and actions: read). When GitHub cannot answer, every plan runs;
-// REPO_KIT_FORCE=true runs every plan without asking.
+// PACKAGE_KIT_FORCE=true runs every plan without asking.
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -99,22 +99,22 @@ export function labelsAllow(labels = [], platform) {
   });
 }
 
-/** REPO_KIT_PLANS: { name: [accepted check name or status context, ...] }; a trailing * accepts a prefix. */
+/** PACKAGE_KIT_PLANS: { name: [accepted check name or status context, ...] }; a trailing * accepts a prefix. */
 export function parsePlans(text) {
-  if (!text) throw new Error('REPO_KIT_PLANS is empty: set it to a JSON object such as {"verify": ["check / verify"]}');
+  if (!text) throw new Error('PACKAGE_KIT_PLANS is empty: set it to a JSON object such as {"verify": ["check / verify"]}');
   let plans;
   try {
     plans = JSON.parse(text);
   } catch {
-    throw new Error(`REPO_KIT_PLANS is not JSON: ${text}`);
+    throw new Error(`PACKAGE_KIT_PLANS is not JSON: ${text}`);
   }
-  if (!plans || typeof plans !== "object" || Array.isArray(plans)) throw new Error("REPO_KIT_PLANS must be an object of plan names to lists of accepted checks");
+  if (!plans || typeof plans !== "object" || Array.isArray(plans)) throw new Error("PACKAGE_KIT_PLANS must be an object of plan names to lists of accepted checks");
   for (const [name, accepted] of Object.entries(plans)) {
     if (!Array.isArray(accepted) || !accepted.length || accepted.some(item => typeof item !== "string" || !item)) {
       throw new Error(`plan ${name} needs a non-empty list of check names or status contexts`);
     }
   }
-  if (!Object.keys(plans).length) throw new Error("REPO_KIT_PLANS names no plan");
+  if (!Object.keys(plans).length) throw new Error("PACKAGE_KIT_PLANS names no plan");
   return plans;
 }
 
@@ -223,12 +223,12 @@ function append(file, text) {
 /** The workflow step: writes `urls` (plan name to link, "" to run), `tree` and `platform` to GITHUB_OUTPUT. */
 export async function runVerifiedTree(env = process.env, fetcher = fetch) {
   let plans, branches;
-  const platform = env.REPO_KIT_PLATFORM || hostPlatform();
+  const platform = env.PACKAGE_KIT_PLATFORM || hostPlatform();
   try {
-    if (!PLATFORM.test(platform)) throw new Error(`REPO_KIT_PLATFORM must be <os>-<arch> in Node's names, such as linux-x64: ${platform}`);
-    plans = parsePlans(env.REPO_KIT_PLANS);
-    branches = env.REPO_KIT_BRANCHES ? JSON.parse(env.REPO_KIT_BRANCHES) : ["main", "dev"];
-    if (!Array.isArray(branches)) throw new Error(`REPO_KIT_BRANCHES must be a JSON list: ${env.REPO_KIT_BRANCHES}`);
+    if (!PLATFORM.test(platform)) throw new Error(`PACKAGE_KIT_PLATFORM must be <os>-<arch> in Node's names, such as linux-x64: ${platform}`);
+    plans = parsePlans(env.PACKAGE_KIT_PLANS);
+    branches = env.PACKAGE_KIT_BRANCHES ? JSON.parse(env.PACKAGE_KIT_BRANCHES) : ["main", "dev"];
+    if (!Array.isArray(branches)) throw new Error(`PACKAGE_KIT_BRANCHES must be a JSON list: ${env.PACKAGE_KIT_BRANCHES}`);
   } catch (error) {
     console.error(`verified-tree: ${error.message}`);
     return 1;
@@ -239,12 +239,12 @@ export async function runVerifiedTree(env = process.env, fetcher = fetch) {
   // The caller's workflow file, from owner/repo/<path>@<ref>.
   const workflowPath = env.GITHUB_WORKFLOW_REF?.replace(/^[^/]+\/[^/]+\//, "").replace(/@.*$/, "");
   const workflow = workflowPath ? { path: workflowPath, release: env.GITHUB_REF === "refs/heads/main" || env.GITHUB_BASE_REF === "main" } : undefined;
-  if (env.REPO_KIT_FORCE === "true") {
+  if (env.PACKAGE_KIT_FORCE === "true") {
     lines.push("- forced: every plan runs");
   } else try {
     const result = await findVerified({
-      repository: env.GITHUB_REPOSITORY, sha: env.GITHUB_SHA, extra: [env.REPO_KIT_HEAD_SHA],
-      plans, branches, depth: Number(env.REPO_KIT_DEPTH) || 100, workflow, platform, token: env.GITHUB_TOKEN, fetcher,
+      repository: env.GITHUB_REPOSITORY, sha: env.GITHUB_SHA, extra: [env.PACKAGE_KIT_HEAD_SHA],
+      plans, branches, depth: Number(env.PACKAGE_KIT_DEPTH) || 100, workflow, platform, token: env.GITHUB_TOKEN, fetcher,
     });
     tree = result.tree;
     for (const [name, hit] of Object.entries(result.plans)) {

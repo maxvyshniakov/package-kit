@@ -13,12 +13,12 @@ const cli = (args, { cwd = os.tmpdir(), env = {} } = {}) => spawnSync(process.ex
 });
 
 for (const command of ["tls", "adopt", "rust"]) {
-  test(`repo-kit ${command} exits 1 and says it was removed and what to do instead`, () => {
+  test(`package-kit ${command} exits 1 and says it was removed and what to do instead`, () => {
     const result = cli([command, "--json"]);
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
     assert.equal(result.stderr, `${REMOVED_COMMANDS[command]}\n`);
-    assert.match(result.stderr, new RegExp(`^repo-kit ${command} was removed in 0\\.10\\.0: `));
+    assert.match(result.stderr, new RegExp(`^package-kit ${command} was removed in 0\\.10\\.0: `));
   });
 }
 
@@ -37,7 +37,7 @@ test("publish --prerelease fails with the removal, before anything is published"
     for (const args of [["--prerelease", "integration", "--dist-tag", "integration"], ["--dry-run"]]) {
       const result = cli(["publish", ...args], { cwd: repository.root });
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /^repo-kit: publish --prerelease was removed in 0\.10\.0/);
+      assert.match(result.stderr, /^package-kit: publish --prerelease was removed in 0\.10\.0/);
     }
   } finally {
     repository.cleanup();
@@ -58,7 +58,7 @@ test("friction still works, with its deprecation on stderr and stdout unchanged"
     console.log = log;
   }
   assert.equal(result.stdout, `${printed.join("\n")}\n`);
-  assert.match(result.stdout, /repo-kit friction log/);
+  assert.match(result.stdout, /package-kit friction log/);
 });
 
 test("heavy still runs its command", () => {
@@ -68,12 +68,12 @@ test("heavy still runs its command", () => {
 });
 
 test("a config with an unknown key fails the command with the key's path", () => {
-  const repository = tempRepository(rootPackageFiles({ "repo-kit.config.mjs": "export default { verify: { cheapp: true }, rust: {} };\n" }));
+  const repository = tempRepository(rootPackageFiles({ "package-kit.config.mjs": "export default { verify: { cheapp: true }, rust: {} };\n" }));
   try {
     const result = cli(["check-changelogs"], { cwd: repository.root });
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /^repo-kit: repo-kit\.config\.mjs:\n {2}unknown key verify\.cheapp; did you mean cheap\? It is a key of each verify step/);
-    assert.match(result.stderr, /\n {2}rust: repo-kit rust was removed in 0\.10\.0/);
+    assert.match(result.stderr, /^package-kit: package-kit\.config\.mjs:\n {2}unknown key verify\.cheapp; did you mean cheap\? It is a key of each verify step/);
+    assert.match(result.stderr, /\n {2}rust: package-kit rust was removed in 0\.10\.0/);
   } finally {
     repository.cleanup();
   }

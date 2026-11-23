@@ -20,7 +20,7 @@ export async function notify(target, token, fetcher = fetch) {
   } catch (error) {
     // Publication already succeeded. Do not retry an immutable package release:
     // the target's own schedule is the fallback.
-    console.warn(`Requesting ${label} failed: ${error.message}. Run again with: bun run repo-kit notify`);
+    console.warn(`Requesting ${label} failed: ${error.message}. Run again with: bun run package-kit notify`);
     return false;
   }
 }

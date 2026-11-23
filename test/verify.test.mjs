@@ -43,9 +43,9 @@ test("a step may need only earlier steps, and names are unique", () => {
   assert.throws(() => normalizeSteps([{ name: "a", command: [], workers: 2, usesCores: true }]), /exclude each other/);
 });
 
-test("repo-kit's own verify runs its package scripts", () => {
+test("package-kit's own verify runs its package scripts", () => {
   const { scripts } = JSON.parse(fs.readFileSync(path.join(kitRoot, "package.json"), "utf8"));
-  return import(path.join(kitRoot, "repo-kit.config.mjs")).then(({ default: config }) => {
+  return import(path.join(kitRoot, "package-kit.config.mjs")).then(({ default: config }) => {
     for (const { name, command: [run, script] } of verifySteps(withDefaults(config))) {
       assert.equal(run, "run", name);
       assert.ok(scripts[script], `${name}: package.json has no "${script}" script`);
@@ -171,7 +171,7 @@ test("verify's memory is its lease's slots, capped by the cgroup and MemAvailabl
   assert.equal(verifyMemory(lease(3), { ...runner, free: 3 * GiB }), 3, "and by MemAvailable");
   assert.equal(verifyMemory(lease(3), { ...runner, constrained: 0 }), 9, "two slots of 5 GiB, MemAvailable lower");
   assert.equal(verifyMemory(lease(3), { platform: "darwin", free: 1 * GiB, total: 32 * GiB, constrained: 0, capacity: () => ({ total: 6, gib_per_slot: null }) }), Infinity, "a lease of cores only: cores decide");
-  assert.equal(verifyMemory({ REPO_KIT_VERIFY_MEMORY_GIB: "6" }, linux), 6);
+  assert.equal(verifyMemory({ PACKAGE_KIT_VERIFY_MEMORY_GIB: "6" }, linux), 6);
 });
 
 test("verify sizes the steps that use cores to its lease", () => {
@@ -181,7 +181,7 @@ test("verify sizes the steps that use cores to its lease", () => {
   assert.equal(verifyCores({ SLOTFATHER_LEASE: "/lease", SLOTFATHER_COUNT: "6" }, options), 12);
   assert.equal(verifyCores({ SLOTFATHER_COUNT: "3" }, options), 12, "no lease without SLOTFATHER_LEASE");
   assert.equal(verifyCores({ SLOTFATHER_LEASE: "/lease", SLOTFATHER_COUNT: "3" }, { cpus: 12, capacity: () => ({}) }), 12, "slotfather unreadable");
-  assert.equal(verifyCores({ REPO_KIT_VERIFY_CORES: "4", SLOTFATHER_LEASE: "/lease", SLOTFATHER_COUNT: "6" }, options), 4);
+  assert.equal(verifyCores({ PACKAGE_KIT_VERIFY_CORES: "4", SLOTFATHER_LEASE: "/lease", SLOTFATHER_COUNT: "6" }, options), 4);
   assert.equal(verifyCores({ SID_KIT_VERIFY_CORES: "5" }, options), 5, "the older name still works");
   assert.equal(unitTestWorkers(1), 1);
   assert.ok(unitTestWorkers(6) >= 1 && unitTestWorkers(6) < 6);
@@ -191,7 +191,7 @@ test("verify sizes the steps that use cores to its lease", () => {
 function fakeRepository(bunScript) {
   const repository = tempRepository({
     "package.json": { name: "fake", version: "0.0.0", type: "module" },
-    "repo-kit.config.mjs": `export default { verify: { steps: [
+    "package-kit.config.mjs": `export default { verify: { steps: [
   { name: "lint", command: ["run", "lint"] },
   { name: "unit tests", command: ["run", "test"], usesCores: true },
   { name: "build", command: ["run", "build"], memory: 0.1 },
@@ -202,15 +202,15 @@ function fakeRepository(bunScript) {
   });
   fs.mkdirSync(path.join(repository.root, "bin"));
   fs.writeFileSync(path.join(repository.root, "bin/bun"), bunScript, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, REPO_KIT_VERIFY_CORES: "2", REPO_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
+  const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, PACKAGE_KIT_VERIFY_CORES: "2", PACKAGE_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
   delete env.GITHUB_ACTIONS;
   return { ...repository, env };
 }
 
-test("verify leases REPO_KIT_VERIFY_SLOTS when set, as CI's verify.yml sets it, and its configured slots otherwise", () => {
+test("verify leases PACKAGE_KIT_VERIFY_SLOTS when set, as CI's verify.yml sets it, and its configured slots otherwise", () => {
   const repository = tempRepository({
     "package.json": { name: "fake", version: "0.0.0", type: "module" },
-    "repo-kit.config.mjs": `export default { verify: { slots: 1, browserSlots: 2, steps: [{ name: "lint", command: ["run", "lint"] }], browser: [{ name: "stories", command: ["run", "stories"] }] } };\n`,
+    "package-kit.config.mjs": `export default { verify: { slots: 1, browserSlots: 2, steps: [{ name: "lint", command: ["run", "lint"] }], browser: [{ name: "stories", command: ["run", "stories"] }] } };\n`,
   });
   try {
     const bin = path.join(repository.root, "bin");
@@ -220,16 +220,16 @@ test("verify leases REPO_KIT_VERIFY_SLOTS when set, as CI's verify.yml sets it, 
     fs.writeFileSync(path.join(bin, "slotfather"), `#!/bin/sh\necho "$*" >> "${calls}"\n`, { mode: 0o755 });
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
     delete env.SLOTFATHER_LEASE;
-    delete env.REPO_KIT_VERIFY_SLOTS;
-    delete env.REPO_KIT_SLOT_WAIT;
+    delete env.PACKAGE_KIT_VERIFY_SLOTS;
+    delete env.PACKAGE_KIT_SLOT_WAIT;
     delete env.SID_KIT_SLOT_WAIT;
     // The caller's own lease context (a lane, an agent's priority) is not the fixture's.
-    for (const name of Object.keys(env)) if (name.startsWith("REPO_KIT_SLOT_")) delete env[name];
+    for (const name of Object.keys(env)) if (name.startsWith("PACKAGE_KIT_SLOT_")) delete env[name];
     const verify = (args, extra = {}) => spawnSync(process.execPath, [cli, "verify", ...args], { cwd: repository.root, env: { ...env, ...extra }, encoding: "utf8" });
     assert.equal(verify([]).status, 0);
     assert.equal(verify(["--browser"]).status, 0);
-    assert.equal(verify([], { REPO_KIT_VERIFY_SLOTS: "all" }).status, 0);
-    assert.equal(verify(["--browser"], { REPO_KIT_VERIFY_SLOTS: "all" }).status, 0);
+    assert.equal(verify([], { PACKAGE_KIT_VERIFY_SLOTS: "all" }).status, 0);
+    assert.equal(verify(["--browser"], { PACKAGE_KIT_VERIFY_SLOTS: "all" }).status, 0);
     const leases = fs.readFileSync(calls, "utf8").trim().split("\n").map(line => line.split(" -- ")[0]);
     // The fixture is no Git repository: its package.json names the project.
     const project = "fake";
@@ -280,8 +280,8 @@ test("a daemon orphaned before any sample saw it joins the step its environment 
   assert.deepEqual(offered, [[700, 800]]);
 });
 
-test("markedProcesses reads REPO_KIT_STEP from a process's environment", async () => {
-  const child = spawn(process.execPath, ["-e", "process.stdout.write('ready\\n'); setTimeout(() => {}, 10000)"], { env: { ...process.env, REPO_KIT_STEP: "run-1.3" }, stdio: ["ignore", "pipe", "ignore"] });
+test("markedProcesses reads PACKAGE_KIT_STEP from a process's environment", async () => {
+  const child = spawn(process.execPath, ["-e", "process.stdout.write('ready\\n'); setTimeout(() => {}, 10000)"], { env: { ...process.env, PACKAGE_KIT_STEP: "run-1.3" }, stdio: ["ignore", "pipe", "ignore"] });
   try {
     await new Promise((resolve, reject) => {
       child.stdout.once("data", resolve);
@@ -333,8 +333,8 @@ function runFakeVerify({ failing = "", bytes = 1 << 20, sleepBuild = false, deta
 node -e 'process.stdout.write("x".repeat(${bytes}) + "\\n")'
 [ "$2" = "${failing}" ] && exit 3
 [ -n "${failing}" ] && sleep 5
-[ "$2" = "test" ] && echo "workers=$VITEST_MAX_WORKERS/$REPO_KIT_WORKERS"
-[ "$2" = "typecheck" ] && echo "workers=$VITEST_MAX_WORKERS/$REPO_KIT_WORKERS"
+[ "$2" = "test" ] && echo "workers=$VITEST_MAX_WORKERS/$PACKAGE_KIT_WORKERS"
+[ "$2" = "typecheck" ] && echo "workers=$VITEST_MAX_WORKERS/$PACKAGE_KIT_WORKERS"
 [ "$2" = "build" ] && [ -n "${sleepBuild ? 1 : ""}" ] && node -e 'const a = Buffer.alloc(64 << 20, 1); setTimeout(() => a.length, 2500)'
 # A daemon in a session of its own whose parent exits at once, as agent-browser's does.
 [ "$2" = "build" ] && [ -n "${orphanBuild ? 1 : ""}" ] && node -e 'require("child_process").spawn(process.execPath, ["-e", "const a = Buffer.alloc(384 << 20, 1); setTimeout(() => a.length, 3000)"], { detached: true, stdio: "ignore" }).unref()' && sleep 3
@@ -380,10 +380,10 @@ test("a step's peak counts a daemon it started that was orphaned at once, as age
 });
 
 test("a step that outlives its timeout is stopped with its whole tree and fails verify", async () => {
-  const pids = path.join(os.tmpdir(), `repo-kit-timeout-${process.pid}-${Date.now()}`);
+  const pids = path.join(os.tmpdir(), `package-kit-timeout-${process.pid}-${Date.now()}`);
   const repository = tempRepository({
     "package.json": { name: "fake", version: "0.0.0", type: "module" },
-    "repo-kit.config.mjs": `export default { verify: { stepTimeout: 0.5, steps: [
+    "package-kit.config.mjs": `export default { verify: { stepTimeout: 0.5, steps: [
   { name: "hang", command: ["run", "hang"], timeout: 0.03 },
   { name: "lint", command: ["run", "lint"] },
   { name: "after", command: ["run", "after"], needs: ["hang"] },
@@ -398,7 +398,7 @@ test("a step that outlives its timeout is stopped with its whole tree and fails 
 [ "$2" = "hang" ] && node -e 'require("child_process").spawn(process.execPath, ["daemon.cjs"], { detached: true, stdio: ["ignore", "inherit", "inherit"] }).unref()'
 exec sleep 60
 `, { mode: 0o755 });
-  const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, REPO_KIT_VERIFY_CORES: "2", REPO_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
+  const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, PACKAGE_KIT_VERIFY_CORES: "2", PACKAGE_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
   const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const daemons = () => (fs.existsSync(pids) ? fs.readFileSync(pids, "utf8").trim().split("\n").filter(Boolean).map(Number) : []);
   const waitForExit = async (getPids, timeoutMs = 10_000) => {
@@ -433,12 +433,12 @@ exec sleep 60
 test("a timeout of Infinity is no limit, not setTimeout's immediate overflow", () => {
   const repository = tempRepository({
     "package.json": { name: "fake", version: "0.0.0", type: "module" },
-    "repo-kit.config.mjs": `export default { verify: { stepTimeout: Infinity, steps: [{ name: "slow", command: ["run", "slow"] }] } };\n`,
+    "package-kit.config.mjs": `export default { verify: { stepTimeout: Infinity, steps: [{ name: "slow", command: ["run", "slow"] }] } };\n`,
   });
   try {
     fs.mkdirSync(path.join(repository.root, "bin"));
     fs.writeFileSync(path.join(repository.root, "bin/bun"), "#!/bin/sh\nsleep 0.5\n", { mode: 0o755 });
-    const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, REPO_KIT_VERIFY_CORES: "2", REPO_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
+    const env = { ...process.env, PATH: `${path.join(repository.root, "bin")}:${process.env.PATH}`, PACKAGE_KIT_VERIFY_CORES: "2", PACKAGE_KIT_VERIFY_MEMORY_GIB: "16", SLOTFATHER_LEASE: "test" };
     const result = spawnSync(process.execPath, [cli, "verify"], { cwd: repository.root, env, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.status, 0, result.stdout);
     assert.doesNotMatch(result.stdout, /timed out/);
@@ -469,7 +469,7 @@ test("a failing step fails verify and stops the steps beside it", () => {
 });
 
 test("verify streams each step's output live and, on SIGTERM, stops every step before it exits", async () => {
-  const pids = path.join(os.tmpdir(), `repo-kit-pids-${process.pid}-${Date.now()}`);
+  const pids = path.join(os.tmpdir(), `package-kit-pids-${process.pid}-${Date.now()}`);
   const repository = fakeRepository(`#!/bin/sh
 echo "$$" >> "${pids}"
 echo "started $2"
@@ -504,7 +504,7 @@ exec sleep 30
 });
 
 test("when verify is killed outright, its reaper stops every step", async () => {
-  const pids = path.join(os.tmpdir(), `repo-kit-reaped-${process.pid}-${Date.now()}`);
+  const pids = path.join(os.tmpdir(), `package-kit-reaped-${process.pid}-${Date.now()}`);
   const repository = fakeRepository(`#!/bin/sh
 echo "$$" >> "${pids}"
 echo "started $2"
@@ -537,7 +537,7 @@ exec sleep 30
 });
 
 test("one Ctrl-C delivered twice, as under bun run, still lets every step stop on its own", async () => {
-  const marks = path.join(os.tmpdir(), `repo-kit-marks-${process.pid}-${Date.now()}`);
+  const marks = path.join(os.tmpdir(), `package-kit-marks-${process.pid}-${Date.now()}`);
   const repository = fakeRepository(`#!/bin/sh
 trap 'sleep 0.3; echo "$2" >> "${marks}"; exit 130' INT TERM
 echo "started $2"

@@ -41,7 +41,7 @@ export const isolatedGitEnv = () => {
 
 /** A temporary directory with `files` ({ relative: contents }); removed by `cleanup()`. */
 export function tempRepository(files = {}, { git = false } = {}) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "repo-kit-test-")));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-test-")));
   for (const [relative, contents] of Object.entries(files)) {
     const file = path.join(root, relative);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -62,7 +62,7 @@ export function rootPackageFiles(extra = {}) {
   return {
     "package.json": { name: "@maxvyshniakov/example", version: "0.2.0", type: "module" },
     "CHANGELOG.md": changelog,
-    "repo-kit.config.mjs": "export default {};\n",
+    "package-kit.config.mjs": "export default {};\n",
     ...extra,
   };
 }
@@ -87,7 +87,7 @@ export function workspaceFiles(extra = {}) {
 }
 `,
     "docs/GETTING_STARTED.md": "bun add ./maxvyshniakov-example-0.2.0.tgz\n",
-    "repo-kit.config.mjs": "export default {};\n",
+    "package-kit.config.mjs": "export default {};\n",
     ...extra,
   };
 }
