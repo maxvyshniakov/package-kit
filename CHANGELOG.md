@@ -4,6 +4,8 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 0.10.0 - 2026-11-23
+
 ### Breaking
 
 - Repo-Kit is now a kit for Bun JavaScript and TypeScript packages only (repo-kit#23). These commands, exports and options are gone:
