@@ -4,6 +4,12 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 1.0.1 - 2026-11-23
+
+### Changed
+
+- Document enabling "Allow npm publish" and running `release-npm.yml` once to validate npmjs.org trusted publishing in `docs/templates/release-npm.yml` (Refs #23).
+
 ## 1.0.0 - 2026-11-23
 
 ### Breaking

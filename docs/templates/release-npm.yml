@@ -7,6 +7,8 @@
 #
 # - Register this file once on npmjs.org as the package's trusted publisher:
 #   npm trust github <package> --file release-npm.yml --repo <owner>/<repo>
+#   (In the web UI, enable "Allow npm publish" under Allowed actions and run
+#   this workflow once to validate the connection.)
 #   The OIDC claims name this caller's workflow file, so the job stays here
 #   and does not move into a reusable workflow.
 # - Inside Actions, `package-kit publish` skips the release gate's own wait: the
@@ -24,7 +26,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v1.0.0
+    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v1.0.1
     permissions:
       contents: read
       packages: read
@@ -43,5 +45,5 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: maxvyshniakov/package-kit/actions/setup-bun@v1.0.0
-      - uses: maxvyshniakov/package-kit/actions/npm-publish@v1.0.0
+      - uses: maxvyshniakov/package-kit/actions/setup-bun@v1.0.1
+      - uses: maxvyshniakov/package-kit/actions/npm-publish@v1.0.1
