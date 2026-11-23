@@ -4,6 +4,8 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 1.0.0 - 2026-11-23
+
 ### Breaking
 
 - `@maxvyshniakov/repo-kit` is now `@maxvyshniakov/package-kit`, published to npmjs.org with provenance instead of GitHub Packages, from the renamed repository `maxvyshniakov/package-kit` (Refs #23). To move a consumer:

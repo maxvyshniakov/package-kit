@@ -764,9 +764,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
-    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/verify.yml@v1.0.0
   browser:
-    uses: maxvyshniakov/package-kit/.github/workflows/browser.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/browser.yml@v1.0.0
     with:
       checks: '[{"name": "stories", "run": "bun run check:stories -- --no-build"}]'
   # !cancelled() lets the deploy start when a check failed; package-kit ci-gate then
@@ -774,7 +774,7 @@ jobs:
   deploy:
     needs: [check, browser]
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    uses: maxvyshniakov/package-kit/.github/workflows/deploy-storybook.yml@v0.10.0
+    uses: maxvyshniakov/package-kit/.github/workflows/deploy-storybook.yml@v1.0.0
     with:
       url: https://catalog.example.com
       needs: ${{ toJSON(needs) }}
@@ -879,7 +879,7 @@ A cancelled run counts as failed for `publish` under gate `ci`, so `cancel-in-pr
 
 `actions/setup-bun` installs Bun 1.4.4, then runs `bun install --frozen-lockfile` with `token`.
 Jobs that do not use a reusable workflow call it directly:
-`uses: maxvyshniakov/package-kit/actions/setup-bun@v0.10.0`.
+`uses: maxvyshniakov/package-kit/actions/setup-bun@v1.0.0`.
 
 Any repository can call these while package-kit is public. A private copy needs its Settings → Actions → General →
 Access set to "Accessible from repositories owned by the user".
