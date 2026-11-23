@@ -723,8 +723,11 @@ that registry's tarball, checks it against its `dist.integrity` and uploads the 
 The npm publication runs in the caller's own job instead, from
 [`docs/templates/release-npm.yml`](templates/release-npm.yml): a `check` job (`verify.yml`) and a `publish` job that
 grants `contents: write` and `id-token: write`, checks out, sets up Bun and runs `actions/npm-publish`. npm matches a
-trusted publisher by the caller's workflow file, so register that file once:
-`npm trust github <package> --file release-npm.yml --repo <owner>/<repo>`.
+trusted publisher per package and by the caller's workflow file, so configure it on each package's own access page
+(`https://www.npmjs.com/package/<package>/access` — never on a shared kit package) or via
+`npm trust github <package> --file release-npm.yml --repo <owner>/<repo>`, enable "Allow npm publish", and validate
+with one real publish within 48 hours. If `npm publish` fails with `ENEEDAUTH`, `publish` prints the package's own
+access URL.
 
 Reading npmjs.org needs no token for a public package; for a restricted one, set `NPM_TOKEN` to a read token so
 `publish` can see the version. Publishing a package to npmjs.org for the first time, like any change of registry,

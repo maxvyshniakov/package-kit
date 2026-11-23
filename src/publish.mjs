@@ -113,6 +113,16 @@ export function npmPublishArguments({ tarball, name, access = "public", provenan
   ];
 }
 
+export function npmTrustedPublishingHint({ name, output }) {
+  if (!/ENEEDAUTH/i.test(String(output ?? ""))) return null;
+  const accessUrl = `https://www.npmjs.com/package/${name}/access`;
+  return [
+    `npm publish failed with ENEEDAUTH for ${name}.`,
+    `  Trusted publishing is configured per package on its own access page: ${accessUrl}`,
+    `  Verify the repository, workflow (${NPM_RELEASE_WORKFLOW}), and "Allow npm publish" are enabled there, then re-run to validate OIDC.`,
+  ];
+}
+
 function npmPublishEnvironment(env) {
   const clean = {};
   for (const [key, value] of Object.entries(env)) {
@@ -349,7 +359,16 @@ export async function runPublish(config, { resume = false, fetch: fetcher = glob
           execFileSync("bun", publishArguments(fs.existsSync(bunfig) ? bunfig : undefined, archive.tarball), { cwd: pkg.dir, stdio: "inherit", env: { ...process.env, GITHUB_TOKEN: token } });
         } else {
           // Outside the repository with isolated userconfig/env, so neither repo nor $HOME/.npmrc can bypass OIDC.
-          execFileSync("npm", npmPublishArguments({ tarball: archive.tarball, name: pkg.name, access, provenance }), { cwd: workDir, stdio: "inherit", env: npmPublishEnvironment(env) });
+          try {
+            const out = execFileSync("npm", npmPublishArguments({ tarball: archive.tarball, name: pkg.name, access, provenance }), { cwd: workDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: npmPublishEnvironment(env) });
+            if (out) process.stdout.write(out);
+          } catch (error) {
+            if (error?.stdout) process.stdout.write(error.stdout);
+            if (error?.stderr) process.stderr.write(error.stderr);
+            const hint = npmTrustedPublishingHint({ name: pkg.name, output: `${error?.stdout ?? ""}\n${error?.stderr ?? ""}` });
+            if (hint) return fail(hint);
+            throw error;
+          }
         }
       }
     } finally {

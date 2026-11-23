@@ -4,6 +4,10 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+### Changed
+
+- Print the package's own `npmjs.com/package/<name>/access` trusted-publishing checklist when `npm publish` fails with `ENEEDAUTH`, and document per-package trusted-publisher setup in `docs/reference.md`.
+
 ## 1.0.1 - 2026-11-23
 
 ### Changed

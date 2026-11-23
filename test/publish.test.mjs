@@ -16,6 +16,7 @@ import {
   NPM_RELEASE_WORKFLOW,
   npmBlockers,
   npmPublishArguments,
+  npmTrustedPublishingHint,
   provenanceWanted,
   publishArguments,
   publishBlockers,
@@ -429,5 +430,17 @@ test("publish tags only after every registry verified, and checks the archive as
   assert.ok(consumer > 0 && consumer < npmPublish, "packed-consumer checks the archive before any upload");
   assert.ok(npmPublish < verify && verify < refuse && refuse < tag, "an unverified registry returns before the tag");
   // npm runs outside the repository, so a project .npmrc cannot redirect the scope.
-  assert.match(source.slice(npmPublish, npmPublish + 200), /cwd: workDir/);
+  assert.match(source.slice(npmPublish, npmPublish + 220), /cwd: workDir/);
+});
+
+test("npmTrustedPublishingHint names the package's own npmjs.org access page on ENEEDAUTH", () => {
+  assert.equal(npmTrustedPublishingHint({ name: "@maxvyshniakov/text-truncate", output: "npm error code E409" }), null);
+  const hint = npmTrustedPublishingHint({
+    name: "@maxvyshniakov/text-truncate",
+    output: "npm error code ENEEDAUTH\nnpm error need auth This command requires you to be logged in.",
+  });
+  assert.ok(Array.isArray(hint));
+  assert.match(hint.join("\n"), /https:\/\/www\.npmjs\.com\/package\/@maxvyshniakov\/text-truncate\/access/);
+  assert.match(hint.join("\n"), /release-npm\.yml/);
+  assert.match(hint.join("\n"), /Allow npm publish/);
 });
