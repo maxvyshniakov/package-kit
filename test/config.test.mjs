@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { CONFIG_KEYS, configIssues, loadConfig, NOTIFY_KEYS, REMOVED_KEYS, STEP_KEYS, validateConfig, withDefaults } from "../src/config.mjs";
+import { CONFIG_KEYS, configIssues, loadConfig, NOTIFY_KEYS, PUBLISH_ACCESS, PUBLISH_REGISTRIES, REMOVED_KEYS, STEP_KEYS, validateConfig, withDefaults } from "../src/config.mjs";
+import { REGISTRIES } from "../src/registry.mjs";
 import { normalizeSteps, verifySteps } from "../src/verify.mjs";
 import { kitRoot, tempRepository } from "./fixtures.mjs";
 
@@ -152,6 +153,24 @@ test("sections and notify targets must be objects", () => {
   assert.deepEqual(configIssues({ publish: { notify: {} } }), ["publish.notify must be an array of { repository, workflow, ref }"]);
   assert.deepEqual(configIssues({ publish: { notify: ["x"] } }), ["publish.notify[0] must be an object { repository, workflow, ref }"]);
   assert.deepEqual(configIssues(null), ["repo-kit.config.mjs must export an object, got null"]);
+});
+
+test("publish.registry names GitHub Packages, npmjs.org or both, and publish.access npm's access", () => {
+  for (const registry of ["github", "npm", ["npm"], ["github", "npm"], ["npm", "github"]]) {
+    assert.deepEqual(configIssues({ publish: { registry } }), [], JSON.stringify(registry));
+  }
+  for (const access of PUBLISH_ACCESS) assert.deepEqual(configIssues({ publish: { registry: "npm", access } }), []);
+  for (const registry of ["npmjs", [], ["npm", "npm"], ["github", "jsr"], 1]) {
+    assert.deepEqual(configIssues({ publish: { registry } }),
+      [`publish.registry must be "github", "npm" or a list of both without repeats, got ${JSON.stringify(registry)}`]);
+  }
+  assert.deepEqual(configIssues({ publish: { access: "private" } }), ['publish.access must be "public" or "restricted", got "private"']);
+  assert.match(configIssues({ publish: { registries: ["npm"] } })[0], /^unknown key publish\.registries; did you mean publish\.registry\?/);
+  // GitHub Packages stays the default: configs that set neither key publish as before.
+  assert.deepEqual(withDefaults({}).publish, { checks: "check.yml", notify: [], registry: "github", access: "public" });
+  assert.deepEqual(withDefaults({ publish: { registry: "npm", access: "restricted" } }).publish.registry, "npm");
+  // The schema and the registry adapter know the same registries.
+  assert.deepEqual(PUBLISH_REGISTRIES, REGISTRIES);
 });
 
 test("validateConfig throws every issue at once", () => {

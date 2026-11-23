@@ -1,0 +1,53 @@
+name: Publish to npmjs.org
+description: >-
+  Installs Node and npm 11.5.1 or newer, the first with trusted publishing, then
+  runs the publish command (repo-kit publish with publish.registry "npm"). Run it
+  after actions/checkout and actions/setup-bun, in a job that grants
+  id-token: write (OIDC for trusted publishing and provenance) and
+  contents: write (the release tag).
+inputs:
+  command:
+    description: The publish command.
+    default: bun run release:publish
+  node-version:
+    description: Node to install.
+    default: "24"
+  npm-version:
+    description: npm to install; 11.5.1 or newer.
+    default: "11.19.1"
+  slots:
+    description: slotfather slots the publication leases, where the runner has slotfather; all holds the whole runner.
+    default: all
+  slot-wait:
+    description: Seconds to wait for that lease before failing with that reason; 0 waits as long as the job runs.
+    default: "0"
+  token:
+    description: GITHUB_TOKEN for the release gate, the tag push and publish.notify (and GitHub Packages, when publish.registry lists it).
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    # No registry-url: an .npmrc with a token would stand in for trusted publishing.
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      with:
+        node-version: ${{ inputs.node-version }}
+    - shell: bash
+      run: npm install --global "npm@$NPM_VERSION"
+      env:
+        NPM_VERSION: ${{ inputs.npm-version }}
+    - name: Require the OIDC token trusted publishing exchanges
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::The publishing job needs permissions id-token: write: npm trusted publishing and provenance exchange its OIDC token."
+          exit 1
+        fi
+    # Publishing builds the package (prepack): it runs under a lease, like every
+    # heavy job of the reusable workflows.
+    - shell: bash
+      run: node_modules/.bin/repo-kit heavy "$SLOTS" sh -c 'eval "$COMMAND"'
+      env:
+        COMMAND: ${{ inputs.command }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+        SLOTS: ${{ inputs.slots }}
+        REPO_KIT_SLOT_WAIT: ${{ inputs.slot-wait }}

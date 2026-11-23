@@ -65,9 +65,11 @@ A lane registration does not reserve machine capacity.
 
 Process supervision and managed hooks assume POSIX behavior; native Windows is not a supported workflow.
 
-Package releases currently use GitHub Packages, not the public npm registry. GitHub Packages' npm registry requires
-a token for every install, even of a public package, and the package's own visibility is set separately from this
-repository's. This README describes the development branch; use the documentation at your installed version's tag
+Package releases use GitHub Packages by default. GitHub Packages' npm registry requires a token for every install,
+even of a public package, and the package's own visibility is set separately from this repository's.
+`publish: { registry: "npm" }` (or `["github", "npm"]`) publishes to npmjs.org from GitHub Actions instead, with npm
+trusted publishing and, from a public repository, provenance:
+[publishing to npmjs.org](docs/reference.md#publishing-to-npmjsorg). This README describes the development branch; use the documentation at your installed version's tag
 when adopting a release.
 
 ## Install

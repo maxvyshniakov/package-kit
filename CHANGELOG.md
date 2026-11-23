@@ -19,6 +19,12 @@ Versions and release rules: [README.md](README.md#versioning).
 - `repo-kit.config.mjs` is validated when it loads. An unknown section or key fails every command that reads the config. So does an unknown key of a `publish.notify` target or of a verify step (in `verify.steps` and `verify.browser`). The error names the key's path, the nearest known key ("unknown key verify.cheapp; did you mean cheap? It is a key of each verify step") and the keys that section takes. Keys earlier releases read (`adopt`, `rust`, `changelog.versionSource`) instead say which release removed them. Every key the consumer configs set today passes.
   No transition period: Repo-Kit ignoring a key it doesn't know is the defect being fixed. A warning-only period would keep a typo like `stepTimout` doing nothing in every CI run that doesn't show its log.
 
+### Added
+
+- `publish` can publish to npmjs.org (repo-kit#23). `publish.registry` is `"github"` (GitHub Packages, the default, unchanged), `"npm"` or `["github", "npm"]`, and `publish.access` is npm's `--access` (`"public"` by default, or `"restricted"`). With npm listed, `publish` packs one archive, runs `packed-consumer` on it, uploads those bytes to each registry (npmjs.org with `npm publish`, trusted publishing and, from a public repository, `--provenance`), waits until every registry serves the version and tags only when each serves the archive's integrity and npmjs.org holds the provenance attestation it should. It refuses outside GitHub Actions, without `id-token: write`, with npm older than 11.5.1, or with a `publishConfig.registry` that sends the upload elsewhere. `--resume` publishes to the registries still missing the version, with the bytes one already serves.
+- `actions/npm-publish` installs npm 11.5.1 or newer for trusted publishing and runs the publish command; `docs/templates/release-npm.yml` is the caller job that grants it `id-token: write`. `release.yml`'s permissions are unchanged, so its callers need no change.
+- `packed-consumer` checks given archives instead of packing (`runPackedConsumer(config, { tarballs })`), so `publish` checks the exact archive it uploads.
+
 ### Changed
 
 - Upgrading from 0.6.0 (Data Grid, Sid-Kit and Flow Canvas pin it today) also switches on keys those configs already set but 0.6.0 never read. Since 0.9.0, `cheap: true` runs a step in the cheap-first tier, `verify.canary` adds those checks to `--changed` plans when a `verify.runner` path changes, and `verify.inert` paths change no plan. Check the effect after the bump with `repo-kit verify --changed --plan`.

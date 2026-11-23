@@ -99,6 +99,13 @@ export function client({ token, repository, fetch: fetcher = globalThis.fetch } 
       return response.json();
     },
 
+    /** The repository's metadata: `visibility` ("public", "private", "internal") and `private`. */
+    async repositoryInfo() {
+      const response = await fetcher(repoUrl(""), { headers: apiHeaders(token) });
+      if (!response.ok) throw new Error(`repository lookup failed: ${response.status} ${response.statusText}`);
+      return response.json();
+    },
+
     async registryMetadata(name) {
       const response = await fetcher(registryUrl(name), { headers: authHeaders(token) });
       if (response.status === 404) return { versions: {}, "dist-tags": {} };

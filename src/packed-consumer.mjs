@@ -12,6 +12,9 @@
 //
 //   repo-kit packed-consumer [--keep]   run `bun run build` first; --keep prints the project's path
 //
+// `publish` passes `tarballs`, the archives it is about to upload, so the
+// check covers those exact bytes instead of packing again.
+//
 // repo-kit.config.mjs:
 //   packedConsumer: {
 //     versionSources: ["package.json", "apps/storybook/package.json"], // where exact versions are pinned
@@ -116,13 +119,54 @@ function run(command, argv, options = {}) {
   return result;
 }
 
+/** The files (without the package/ prefix) and the manifest inside a packed archive. */
+export function inspectTarball(tarball) {
+  const listing = run("tar", ["-tzf", tarball]);
+  if (listing.status !== 0) throw new Error(`${tarball} is not a readable tarball:\n${listing.stderr}`);
+  // Directory entries, which an archive not packed by bun may hold, are not files.
+  const files = new Set(listing.stdout.split("\n").filter(entry => entry && !entry.endsWith("/")).map(entry => entry.replace(/^package\//, "")));
+  const packedManifest = JSON.parse(run("tar", ["-xzOf", tarball, "package/package.json"]).stdout);
+  return { files, packedManifest };
+}
+
+/**
+ * Each released package with the archive the check installs: packed into
+ * `tarballDir`, or, given `tarballs` (paths of archives already packed),
+ * copied there and matched to its package by the packed manifest's name.
+ */
+export function packedArchives(released, { tarballDir, tarballs } = {}) {
+  if (tarballs) {
+    const byName = new Map(tarballs.map(source => {
+      const tarball = path.join(tarballDir, path.basename(source));
+      fs.copyFileSync(source, tarball);
+      const inspected = inspectTarball(tarball);
+      return [inspected.packedManifest.name, { tarball, ...inspected }];
+    }));
+    return released.map(pkg => {
+      const packed = byName.get(pkg.name);
+      if (!packed) throw new Error(`No prebuilt tarball for ${pkg.name}; got ${[...byName.keys()].join(", ") || "none"}.`);
+      if (packed.packedManifest.version !== pkg.version) throw new Error(`The prebuilt tarball of ${pkg.name} is ${packed.packedManifest.version}, not ${pkg.version}.`);
+      return { ...pkg, ...packed };
+    });
+  }
+  return released.map(pkg => {
+    const distTargets = Object.values(pkg.manifest.exports ?? {}).flatMap(exportTargets).filter(target => target.startsWith("./dist/"));
+    if (distTargets.length && !fs.existsSync(path.join(pkg.dir, "dist"))) throw new Error(`${pkg.name} has no dist; run \`bun run build\` first.`);
+    const packed = run("bun", ["pm", "pack", "--ignore-scripts", "--quiet", "--destination", tarballDir], { cwd: pkg.dir });
+    if (packed.status !== 0) throw new Error(`bun pm pack failed for ${pkg.name}:\n${packed.stderr}`);
+    const tarball = packed.stdout.trim().split("\n").at(-1);
+    if (!fs.existsSync(tarball)) throw new Error(`bun pm pack did not produce ${tarball}`);
+    return { ...pkg, tarball, ...inspectTarball(tarball) };
+  });
+}
+
 function writeFile(file, contents) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, contents);
 }
 
 /** Resolves to whether every check passed. */
-export async function runPackedConsumer(config, { keep = false, args = [] } = {}) {
+export async function runPackedConsumer(config, { keep = false, args = [], tarballs } = {}) {
   const { root } = config;
   const options = config.packedConsumer;
   const failures = [];
@@ -142,19 +186,9 @@ export async function runPackedConsumer(config, { keep = false, args = [] } = {}
   fs.mkdirSync(tarballDir);
   fs.mkdirSync(consumerDir);
   try {
-    console.log(`Packing into ${tarballDir}`);
-    const packages = released.map(pkg => {
-      const distTargets = Object.values(pkg.manifest.exports ?? {}).flatMap(exportTargets).filter(target => target.startsWith("./dist/"));
-      if (distTargets.length && !fs.existsSync(path.join(pkg.dir, "dist"))) throw new Error(`${pkg.name} has no dist; run \`bun run build\` first.`);
-      const packed = run("bun", ["pm", "pack", "--ignore-scripts", "--quiet", "--destination", tarballDir], { cwd: pkg.dir });
-      if (packed.status !== 0) throw new Error(`bun pm pack failed for ${pkg.name}:\n${packed.stderr}`);
-      const tarball = packed.stdout.trim().split("\n").at(-1);
-      if (!fs.existsSync(tarball)) throw new Error(`bun pm pack did not produce ${tarball}`);
-      const files = new Set(run("tar", ["-tzf", tarball]).stdout.split("\n").filter(Boolean).map(entry => entry.replace(/^package\//, "")));
-      const packedManifest = JSON.parse(run("tar", ["-xzOf", tarball, "package/package.json"]).stdout);
-      console.log(`  ${pkg.name}: ${path.basename(tarball)} (${files.size} files)`);
-      return { ...pkg, packedManifest, tarball, files };
-    });
+    console.log(tarballs ? `Checking the prebuilt archives in ${tarballDir}` : `Packing into ${tarballDir}`);
+    const packages = packedArchives(released, { tarballDir, tarballs });
+    for (const pkg of packages) console.log(`  ${pkg.name}: ${path.basename(pkg.tarball)} (${pkg.files.size} files)`);
 
     console.log("\nTarball contents");
     const before = failures.length;

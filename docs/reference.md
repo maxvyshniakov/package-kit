@@ -92,6 +92,8 @@ export default {
   publish: {
     checks: "check.yml",   // the workflow publish waits for on the release commit; false: none can run yet
     notify: [{ repository: "maxvyshniakov/data-grid", workflow: "update-catalog-dependencies.yml", ref: "main" }],
+    registry: "github",    // "github" (GitHub Packages, the default), "npm" (npmjs.org) or ["github", "npm"], in that order
+    access: "public",      // npm's --access on npmjs.org: "public" (the default) or "restricted"
   },
   changelog: {
     quickStart: "docs/GETTING_STARTED.md", // archive names checked and moved by release, when the file exists
@@ -234,10 +236,10 @@ export default {
 | `release [<package>:]<patch\|minor\|major\|x.y.z> [--date=]` | Cuts `## Unreleased` into a version; sets `package.json`, `bun.lock` and the quick start. |
 | `release-gate [<ref>] [--rerun] [--no-attest]` | The local [release gate](#release-gate) on a commit (default `HEAD`): a clean worktree, frozen install, `verify --release`, `verify --browser` with Chromium in software compositing; records the commit status `Library checks (local, <os>-<arch>)`, such as `(local, darwin-arm64)`. `--mode` prints `release.gate`. |
 | `ci-gate` | In a workflow job that needs the checks (`deploy-storybook.yml`): writes `run=true` under gate `local`, or under gate `ci` when every job in `REPO_KIT_NEEDS` (the caller's `toJSON(needs)`) passed. |
-| `publish [--resume]` | HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes, checks the registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication. |
+| `publish [--resume]` | HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes to `publish.registry` ([npmjs.org](#publishing-to-npmjsorg) packs one archive and checks it first), waits until every registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication: the registries still missing the version, then the tag. |
 | `notify` | Requests `publish.notify`'s workflows again. |
 | `heavy <slots\|all> <command...>` | Runs a command under `slotfather run -n <slots>` when slotfather is on PATH and no lease is held; otherwise directly. |
-| `packed-consumer [--keep]` | Packs, installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
+| `packed-consumer [--keep]` | Packs (or, from `publish`, takes the archive it is about to upload), installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
 | `shoot <story id filter...> [<url>\|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]` | [Story screenshots](#story-screenshots) from a running Storybook, under a lease of `shoot.slots`. |
 | `serve <dir> [--port N] [--host 127.0.0.1]` | Dependency-free HTTP/1.1 Keep-Alive [static preview server](#static-preview-server) (`@maxvyshniakov/repo-kit/serve`): high socket backlog (`2048`), `Cache-Control: no-cache` for `.html` and `.json`, `public, max-age=31536000, immutable` for hashed `/assets/*`, path-traversal guard (`403`) and clean MIME types. Use instead of `python3 -m http.server`. |
 | `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `repo-kit.config.mjs` too. |
@@ -692,6 +694,44 @@ enforcement. If a repository enables protection, require `Library checks (local,
 `check.yml` jobs under gate `ci`, not both. A rule that still requires the deprecated `Library checks (local, macOS)`
 passes until the next batched minor; move it to the new context before then.
 
+## Publishing to npmjs.org
+
+`publish: { registry: "npm" }` publishes to npmjs.org instead of GitHub Packages, with npm trusted publishing: GitHub
+Actions' OIDC token instead of a long-lived npm token, and from a public repository a provenance attestation. While
+consumers still install the package from GitHub Packages (`bunfig.toml` and `.npmrc` map a whole scope to one
+registry), `registry: ["github", "npm"]` publishes to both, in that order. `"github"` stays the default and runs
+`bun publish` as before.
+
+With npm in the list, `publish`:
+
+1. Refuses outside GitHub Actions, naming `gh workflow run release-npm.yml --ref main`; refuses a job without
+   `id-token: write` (no `ACTIONS_ID_TOKEN_REQUEST_URL`), an npm older than 11.5.1, and a `publishConfig.registry`
+   other than `https://registry.npmjs.org/` (beside GitHub Packages, any `publishConfig.registry`).
+2. Packs one archive with `bun pm pack` (prepack builds it; `workspace:` and `catalog:` ranges are resolved) and runs
+   [packed-consumer](#commands) on those bytes.
+3. Uploads that archive to each registry: GitHub Packages with `bun publish <archive>`, npmjs.org with
+   `npm publish <archive> --access <publish.access>` from outside the repository, so an `.npmrc` scope mapping
+   cannot send it elsewhere. `--provenance` is added only when the repository is public and `publish.access` is
+   `public`: npm refuses provenance from a private repository.
+4. Waits (up to five minutes) until every registry serves the version, then tags only if each serves the archive's
+   `sha512` integrity and, when provenance was requested, npmjs.org lists a provenance attestation
+   (`dist.attestations`). A mismatch prints the registry, the served and the expected integrity, and leaves the
+   version untagged.
+
+`--resume` publishes to the registries still missing the version. When one already serves it, `publish` downloads
+that registry's tarball, checks it against its `dist.integrity` and uploads the same bytes to the others.
+
+`release.yml` keeps its permissions: adding `id-token: write` there would fail every caller that does not grant it.
+The npm publication runs in the caller's own job instead, from
+[`docs/templates/release-npm.yml`](templates/release-npm.yml): a `check` job (`verify.yml`) and a `publish` job that
+grants `contents: write` and `id-token: write`, checks out, sets up Bun and runs `actions/npm-publish`. npm matches a
+trusted publisher by the caller's workflow file, so register that file once:
+`npm trust github <package> --file release-npm.yml --repo <owner>/<repo>`.
+
+Reading npmjs.org needs no token for a public package; for a restricted one, set `NPM_TOKEN` to a read token so
+`publish` can see the version. Publishing a package to npmjs.org for the first time, like any change of registry,
+is the owner's decision.
+
 ## GITHUB_TOKEN
 
 `bunfig.toml` reads `@maxvyshniakov` packages with `token = "$GITHUB_TOKEN"`. Every `bun install` in these
@@ -749,6 +789,7 @@ jobs:
 | `browser.yml` | `checks` (JSON list of `{name, run}`), `build`, `playwright` (true), `slots` (`all`: the build and every check lease them together), `slot-wait` (0), `runner`, `timeout-minutes` (45: the wait, the build and every check), `verified-url`, `junit`, `junit-artifact` |
 | `deploy-storybook.yml` | `url`, `needs` (the caller's `toJSON(needs)`, for `repo-kit ci-gate`; default `{}`), `environment` (`storybook`), `runner`, `slots` (`all`, for the builds and `storybook:prepare-deploy`), `slot-wait` (0), `timeout-minutes` (30); `STORYBOOK_CLOUDFLARE_API_TOKEN` from that environment, with `secrets: inherit` |
 | `release.yml` | `command` (`bun run release:publish`), `enabled` (true), `slots` (`all`), `slot-wait` (0), `runner`, `timeout-minutes` (30); the caller grants `contents: write`, `packages: write` |
+| `actions/npm-publish` (an action, in the caller's own job) | `command` (`bun run release:publish`), `node-version` (24), `npm-version` (11.19.1; 11.5.1 or newer), `slots` (`all`), `slot-wait` (0), `token`; the job grants `contents: write`, `id-token: write`. See [publishing to npmjs.org](#publishing-to-npmjsorg) |
 | `verified-tree.yml` | `plans` (required), `branches` (`["main", "dev"]`), `depth` (100), `force` (false), `platform` (the lookup runner's), `runner`; outputs `urls`, `tree`, `platform`; the caller grants `contents: read`, `checks: read`, `statuses: read`, `actions: read` to this job |
 
 `runner` is `runs-on` as JSON and defaults to `'["ubuntu-latest"]'`. A private repository may name a self-hosted

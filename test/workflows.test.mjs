@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { KIT_VERSION, kitReferences } from "../src/check.mjs";
+import { NPM_FLOOR, NPM_RELEASE_WORKFLOW } from "../src/publish.mjs";
+import { compareVersions } from "../src/semver.mjs";
 import { BUN_VERSION } from "../src/token.mjs";
 import { kitRoot } from "./fixtures.mjs";
 
@@ -12,6 +14,9 @@ const workflowsDir = path.join(kitRoot, ".github/workflows");
 const read = file => fs.readFileSync(file, "utf8");
 const reusable = ["verify.yml", "browser.yml", "deploy-storybook.yml", "release.yml"];
 const action = read(path.join(kitRoot, "actions/setup-bun/action.yml"));
+const actionFiles = fs.readdirSync(path.join(kitRoot, "actions")).map(dir => path.join(kitRoot, "actions", dir, "action.yml"));
+const npmAction = path.join(kitRoot, "actions/npm-publish/action.yml");
+const npmTemplate = path.join(kitRoot, "docs/templates", NPM_RELEASE_WORKFLOW);
 
 test("the reusable workflows run only when called", () => {
   for (const file of reusable) {
@@ -92,7 +97,7 @@ test("every heavy step of the reusable workflows runs under a lease of the whole
 });
 
 test("third-party actions are pinned by commit SHA", () => {
-  const files = [...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)), path.join(kitRoot, "actions/setup-bun/action.yml")];
+  const files = [...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)), ...actionFiles, npmTemplate];
   for (const file of files) {
     for (const [, target] of read(file).matchAll(/(?<!\w)uses: ([^\s]+)/g)) {
       if (target.startsWith("./") || target.startsWith("maxvyshniakov/repo-kit/")) continue;
@@ -119,9 +124,16 @@ test("no action or workflow runs the removed TLS gate", () => {
 });
 
 test("inputs reach shell commands through the environment, not through expressions", () => {
-  for (const file of reusable) {
-    for (const [, command] of read(path.join(workflowsDir, file)).matchAll(/run: (.+)/g)) {
-      assert.doesNotMatch(command, /\$\{\{/, `${file}: ${command}`);
+  for (const file of [...reusable.map(name => path.join(workflowsDir, name)), npmAction]) {
+    const text = read(file);
+    // A step's `run:` line, and the lines of each `run: |` block.
+    const commands = [
+      ...[...text.matchAll(/run: (?!\|\n)(.+)/g)].map(match => match[1]),
+      ...[...text.matchAll(/^( *)run: \|\n((?:\1 {2,}.*\n)*)/gm)].map(match => match[2]),
+    ];
+    assert.ok(commands.length, file);
+    for (const command of commands) {
+      assert.doesNotMatch(command, /\$\{\{/, `${path.basename(path.dirname(file))}/${path.basename(file)}: ${command}`);
     }
   }
 });
@@ -129,17 +141,20 @@ test("inputs reach shell commands through the environment, not through expressio
 test("every workflow and the action parse as YAML with the expected shape", () => {
   // Bun ships a YAML parser; Node does not.
   const script = `
-const files = ${JSON.stringify([...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)), path.join(kitRoot, "actions/setup-bun/action.yml")])};
+const files = ${JSON.stringify([...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)), ...actionFiles, npmTemplate])};
 const shapes = {};
 for (const file of files) {
   const doc = Bun.YAML.parse(await Bun.file(file).text());
-  shapes[file.split("/").pop()] = doc.runs ? { steps: doc.runs.steps.length } : { on: Object.keys(doc.on), jobs: Object.keys(doc.jobs) };
+  const key = file.endsWith("/action.yml") ? file.split("/").slice(-2).join("/") : file.split("/").pop();
+  shapes[key] = doc.runs ? { steps: doc.runs.steps.length } : { on: Object.keys(doc.on), jobs: Object.keys(doc.jobs) };
 }
 console.log(JSON.stringify(shapes));`;
   const result = spawnSync("bun", ["-e", script], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const shapes = JSON.parse(result.stdout);
-  assert.deepEqual(shapes["action.yml"], { steps: 2 });
+  assert.deepEqual(shapes["setup-bun/action.yml"], { steps: 2 });
+  assert.deepEqual(shapes["npm-publish/action.yml"], { steps: 4 });
+  assert.deepEqual(shapes[NPM_RELEASE_WORKFLOW], { on: ["workflow_dispatch"], jobs: ["check", "publish"] });
   for (const file of reusable) assert.deepEqual(shapes[file].on, ["workflow_call"], file);
   assert.deepEqual(shapes["check.yml"].on, ["push", "pull_request", "workflow_dispatch"]);
 });
@@ -310,4 +325,56 @@ test("the caller template: fast checks on main, the full suite nightly and on re
   // GitHub-hosted by default: the template names no runner.
   for (const job of Object.values(doc.jobs)) assert.equal(job.with?.runner, undefined);
   for (const { ref } of kitReferences(read(template))) assert.equal(ref, `v${KIT_VERSION}`);
+});
+
+// release.yml's callers grant contents: write and packages: write. A new scope
+// there (id-token: write for npm) would fail every caller that does not grant
+// it as its run starts; npmjs.org publishing has its own caller job instead.
+test("release.yml keeps its permissions: contents and packages write, no id-token", () => {
+  const text = read(path.join(workflowsDir, "release.yml"));
+  const blocks = [...text.matchAll(/\n( *)permissions:\n((?:\1 {2}.*\n)+)/g)].map(([, , block]) => block.trim().split("\n").map(line => line.trim()));
+  assert.deepEqual(blocks, [["contents: write", "packages: write"]]);
+  assert.doesNotMatch(text, /id-token/);
+  assert.match(text, /\n# The caller grants contents: write and packages: write\.\n/);
+});
+
+test("the npm-publish action installs npm with trusted publishing, writes no token, and requires the OIDC token", () => {
+  const text = read(npmAction);
+  const npmVersion = /\n {2}npm-version:\n(?: {4}.*\n)*? {4}default: "([\d.]+)"\n/.exec(text)?.[1];
+  assert.ok(npmVersion && compareVersions(npmVersion, NPM_FLOOR) >= 0, `npm-version ${npmVersion} must be ${NPM_FLOOR} or newer`);
+  assert.match(text, /uses: actions\/setup-node@[0-9a-f]{40}\n/);
+  // registry-url would write an .npmrc whose token stands in for trusted publishing.
+  assert.doesNotMatch(text, /^ +(registry-url|NODE_AUTH_TOKEN|NPM_TOKEN):/m);
+  assert.match(text, /run: npm install --global "npm@\$NPM_VERSION"\n/);
+  const steps = text.slice(text.indexOf("  steps:\n")).split("\n    - ").slice(1);
+  assert.match(steps[2], /^name: Require the OIDC token/);
+  assert.match(steps[2], /ACTIONS_ID_TOKEN_REQUEST_URL/);
+  assert.match(steps[2], /exit 1/);
+  // The publication is heavy (prepack builds), so it leases like release.yml.
+  assert.match(steps[3], /run: node_modules\/\.bin\/repo-kit heavy "\$SLOTS" sh -c 'eval "\$COMMAND"'\n/);
+  assert.match(steps[3], /COMMAND: \$\{\{ inputs\.command \}\}\n/);
+  assert.match(text, /\n {2}command:\n(?: {4}.*\n)*? {4}default: bun run release:publish\n/);
+});
+
+test("the npm caller template grants id-token: write to the publishing job only, after its checks", () => {
+  const script = `console.log(JSON.stringify(Bun.YAML.parse(await Bun.file(${JSON.stringify(npmTemplate)}).text())));`;
+  const result = spawnSync("bun", ["-e", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const doc = JSON.parse(result.stdout);
+  assert.deepEqual(doc.permissions, { contents: "read", packages: "read" }, "the workflow's default token is read-only");
+  const { check, publish } = doc.jobs;
+  assert.match(check.uses, /^maxvyshniakov\/repo-kit\/\.github\/workflows\/verify\.yml@v/);
+  assert.deepEqual(check.permissions, { contents: "read", packages: "read" });
+  assert.equal(publish.needs, "check", "inside Actions the caller's jobs gate the publication");
+  assert.equal(publish.if, "${{ github.ref == 'refs/heads/main' }}");
+  assert.deepEqual(publish.permissions, { contents: "write", "id-token": "write", packages: "read" });
+  assert.equal(publish["runs-on"], "ubuntu-latest", "provenance comes from a GitHub-hosted runner");
+  const uses = publish.steps.map(step => step.uses);
+  assert.match(uses[0], /^actions\/checkout@[0-9a-f]{40}$/);
+  assert.equal(publish.steps[0].with["fetch-depth"], 0, "publish reads tags and the release commit");
+  assert.match(uses[1], /^maxvyshniakov\/repo-kit\/actions\/setup-bun@v/);
+  assert.match(uses[2], /^maxvyshniakov\/repo-kit\/actions\/npm-publish@v/);
+  for (const { ref } of kitReferences(read(npmTemplate))) assert.equal(ref, `v${KIT_VERSION}`);
+  // The trusted publisher registration names this caller's file.
+  assert.match(read(npmTemplate), new RegExp(`npm trust github <package> --file ${NPM_RELEASE_WORKFLOW.replace(".", "\\.")} --repo`));
 });

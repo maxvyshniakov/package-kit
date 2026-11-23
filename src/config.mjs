@@ -4,7 +4,7 @@
 //   export default {
 //     verify: { steps: ({ release }) => [...], browser: () => [...], slots: 1, browserSlots: 2, workerMemory: 0.9, stepTimeout: 15 },
 //     prePush: { slots: 3 },
-//     publish: { checks: "check.yml", notify: [{ repository, workflow, ref }] },
+//     publish: { checks: "check.yml", notify: [{ repository, workflow, ref }], registry: "github", access: "public" },
 //     changelog: { quickStart: "docs/GETTING_STARTED.md", peerScope: "@maxvyshniakov/", paths: ["packages/sid-kit/src/**"] },
 //     hooks: { managed: ["commit-msg"] },
 //     release: { gate: "local", afterCut({ root, packages }) {} },
@@ -28,7 +28,7 @@ export const CONFIG_FILE = "repo-kit.config.mjs";
 export const CONFIG_KEYS = {
   verify: ["steps", "browser", "slots", "browserSlots", "workerMemory", "stepTimeout", "inert", "runner", "canary", "smoke"],
   prePush: ["slots", "releaseBranches"],
-  publish: ["checks", "notify"],
+  publish: ["checks", "notify", "registry", "access"],
   changelog: ["quickStart", "peerScope", "paths"],
   release: ["gate", "afterCut"],
   hooks: ["managed"],
@@ -43,6 +43,12 @@ export const CONFIG_KEYS = {
 
 /** The keys of each publish.notify target. */
 export const NOTIFY_KEYS = ["repository", "workflow", "ref"];
+
+/** The registries publish.registry names: one, or a list published in order. */
+export const PUBLISH_REGISTRIES = ["github", "npm"];
+
+/** publish.access: npm's --access for the npmjs.org publication. */
+export const PUBLISH_ACCESS = ["public", "restricted"];
 
 /** The keys of a verify step (verify.steps and verify.browser), checked by normalizeSteps. */
 export const STEP_KEYS = ["name", "command", "needs", "after", "always", "cheap", "smoke", "memory", "usesCores", "workers", "timeout", "slots", "inputs", "scopeArgs"];
@@ -128,6 +134,24 @@ export function configIssues(raw) {
       });
     }
   }
+  issues.push(...publishValueIssues(raw.publish));
+  return issues;
+}
+
+function publishValueIssues(publish) {
+  if (!isPlainObject(publish)) return [];
+  const issues = [];
+  const { registry, access } = publish;
+  if (registry !== undefined) {
+    const list = Array.isArray(registry) ? registry : [registry];
+    const unknown = list.filter(name => !PUBLISH_REGISTRIES.includes(name));
+    if (!list.length || unknown.length || new Set(list).size !== list.length) {
+      issues.push(`publish.registry must be "github", "npm" or a list of both without repeats, got ${JSON.stringify(registry)}`);
+    }
+  }
+  if (access !== undefined && !PUBLISH_ACCESS.includes(access)) {
+    issues.push(`publish.access must be "public" or "restricted", got ${JSON.stringify(access)}`);
+  }
   return issues;
 }
 
@@ -179,7 +203,9 @@ export function withDefaults(config) {
     ...config,
     verify: { slots: 1, browserSlots: 2, workerMemory: 0.9, stepTimeout: 15, ...config.verify },
     prePush: { slots: 1, ...config.prePush },
-    publish: { checks: "check.yml", notify: [], ...config.publish },
+    // registry: "github" (GitHub Packages, the default), "npm" (npmjs.org) or both, in publish order.
+    // access: npm's --access on npmjs.org; "public" unless set.
+    publish: { checks: "check.yml", notify: [], registry: "github", access: "public", ...config.publish },
     changelog: { quickStart: "docs/GETTING_STARTED.md", peerScope: "@maxvyshniakov/", ...config.changelog },
     // gate: "local" (repo-kit release-gate's attestation) or "ci" (the checks workflow); README.md#release-gate.
     release: { gate: "local", ...config.release },

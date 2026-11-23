@@ -115,3 +115,19 @@ test("release-gate does not import publish, and Authorization headers live only 
     .filter(file => /Authorization\s*:/.test(fs.readFileSync(path.join(srcDir, file), "utf8")));
   assert.deepEqual(authFiles, ["github.mjs"]);
 });
+
+test("repositoryInfo reads the repository's visibility, which decides npm provenance", async () => {
+  const seen = [];
+  const gh = client({
+    token: "t",
+    repository: "maxvyshniakov/repo-kit",
+    fetch: async (url, options) => {
+      seen.push({ url, auth: options.headers.Authorization });
+      return { ok: true, status: 200, json: async () => ({ visibility: "public", private: false }) };
+    },
+  });
+  assert.deepEqual(await gh.repositoryInfo(), { visibility: "public", private: false });
+  assert.deepEqual(seen, [{ url: "https://api.github.com/repos/maxvyshniakov/repo-kit", auth: "Bearer t" }]);
+  const failing = client({ token: "t", repository: "o/r", fetch: async () => ({ ok: false, status: 404, statusText: "Not Found" }) });
+  await assert.rejects(failing.repositoryInfo(), /repository lookup failed: 404 Not Found/);
+});
