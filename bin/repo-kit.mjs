@@ -3,7 +3,6 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { main } from "../src/cli.mjs";
-import { runRust } from "../src/rust.mjs";
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
@@ -14,4 +13,4 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
     process.exitCode = 1;
   }
 }
-export { main, runRust };
+export { main };

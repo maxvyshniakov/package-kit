@@ -1,13 +1,10 @@
-// Released packages: hides the version-source kind (package.json vs
-// pyproject.toml) behind one package object so callers ask a package for its
-// version, lockfile entry, archive name, publishability and version commit
-// instead of branching on manifestFile.
+// Released packages: one package object per package.json the repository
+// releases, so callers ask a package for its version, lockfile entry, archive
+// name and version commit instead of reading package.json themselves.
 import fs from "node:fs";
 import path from "node:path";
 
-import { chooseVersionSource, readManifestText, setManifestVersion } from "./version-source.mjs";
-
-export const DEFAULT_MANIFEST_FILE = "package.json";
+export const MANIFEST_FILE = "package.json";
 
 /** Archive slug for a package name (`@scope/name` -> `scope-name`). */
 export function archiveSlug(name) {
@@ -33,13 +30,13 @@ export function setLockfileWorkspaceVersion(lockfile, workspacePath, version) {
 
 /** Repository-relative POSIX path to a package's manifest file. */
 export function packageManifestPath(pkg) {
-  return path.posix.join(pkg.path, pkg.manifestFile ?? DEFAULT_MANIFEST_FILE);
+  return path.posix.join(pkg.path, MANIFEST_FILE);
 }
 
 /** Reads the version string from a package's manifest text. */
 export function readPackageVersion(pkg, text) {
   if (typeof pkg.readVersion === "function") return pkg.readVersion(text);
-  return readManifestText(pkg.manifestFile ?? DEFAULT_MANIFEST_FILE, text).version;
+  return JSON.parse(text).version;
 }
 
 /**
@@ -47,61 +44,52 @@ export function readPackageVersion(pkg, text) {
  * release commit, even when later commits touched the file.
  */
 export function versionCommitOf(git, pkg) {
-  const manifestFile = pkg.manifestFile ?? DEFAULT_MANIFEST_FILE;
-  const file = path.join(pkg.path, manifestFile);
-  const needles = manifestFile === "pyproject.toml"
-    ? [`version = "${pkg.version}"`, `version = '${pkg.version}'`]
-    : [`"version": "${pkg.version}"`];
-  for (const needle of needles) {
-    const commits = git("log", "--reverse", "--format=%H", "-S", needle, "--", file);
-    const [first] = commits.split("\n").filter(Boolean);
-    if (first) return first;
-  }
-  throw new Error(`no commit sets ${needles[0]} in ${file}`);
+  const file = path.join(pkg.path, MANIFEST_FILE);
+  const needle = `"version": "${pkg.version}"`;
+  const [first] = git("log", "--reverse", "--format=%H", "-S", needle, "--", file).split("\n").filter(Boolean);
+  if (first) return first;
+  throw new Error(`no commit sets ${needle} in ${file}`);
 }
 
 /**
  * The packages this repository releases: each directory under packages/ with
- * the version source's manifest (a workspace), or else the root package.
- * `path` is relative to the root ("." for the root package); `manifestFile` is
- * package.json or pyproject.toml (`changelog.versionSource`, version-source.mjs).
+ * a package.json (a workspace), or else the root package. `path` is relative
+ * to the root ("." for the root package).
  */
-export function releasedPackages(root, { versionSource } = {}) {
-  const manifestFile = chooseVersionSource(root, versionSource);
+export function releasedPackages(root) {
+  const manifestFile = MANIFEST_FILE;
   const packagesDir = path.join(root, "packages");
   const workspace = fs.existsSync(packagesDir)
     ? fs.readdirSync(packagesDir, { withFileTypes: true })
       .filter(entry => entry.isDirectory() && fs.existsSync(path.join(packagesDir, entry.name, manifestFile)))
       .map(entry => `packages/${entry.name}`)
     : [];
-  const isNpm = manifestFile === "package.json";
   return (workspace.length ? workspace : ["."]).map(relative => {
     const dir = path.join(root, relative);
     const file = path.join(dir, manifestFile);
-    if (!fs.existsSync(file)) throw new Error(`${path.relative(root, file)} not found; set changelog.versionSource to the file that holds the version`);
-    const { manifest, name, version } = readManifestText(manifestFile, fs.readFileSync(file, "utf8"));
+    if (!fs.existsSync(file)) throw new Error(`${path.relative(root, file)} not found`);
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    const { name, version } = manifest;
     const isWorkspace = relative !== ".";
-    const slug = isNpm ? archiveSlug(name) : undefined;
+    const slug = archiveSlug(name);
     const pkg = {
       path: relative,
       dir,
       manifest,
-      manifestFile,
       name,
       version,
       workspace: isWorkspace,
-      publishable: isNpm,
       readVersion(text) {
-        return readManifestText(manifestFile, text).version;
+        return JSON.parse(text).version;
       },
       withVersion(text, from, to) {
-        return setManifestVersion(manifestFile, text, { from, to });
+        return text.replace(`"version": "${from}"`, `"version": "${to}"`);
       },
       lockfileVersion(lock) {
-        return isNpm && isWorkspace ? lockfileWorkspaceVersion(lock, relative) : undefined;
+        return isWorkspace ? lockfileWorkspaceVersion(lock, relative) : undefined;
       },
       withLockfileVersion(lock, next) {
-        return isNpm && isWorkspace ? setLockfileWorkspaceVersion(lock, relative, next) : lock;
+        return isWorkspace ? setLockfileWorkspaceVersion(lock, relative, next) : lock;
       },
       archiveName(ver = version) {
         return slug ? `${slug}-${ver}.tgz` : undefined;

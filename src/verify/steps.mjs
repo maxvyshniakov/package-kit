@@ -1,6 +1,7 @@
 // Step declaration, sizing, cheap-tier splitting, step cache keys and scheduling (`runSteps`).
 import crypto from "node:crypto";
 
+import { STEP_KEYS, unknownKeyMessage } from "../config.mjs";
 import { createMatcher } from "../plan.mjs";
 import { USES_CORES_BASE_GIB, WORKER_MEMORY_GIB, unitTestWorkers } from "./budget.mjs";
 
@@ -21,6 +22,8 @@ export function normalizeSteps(steps, { stepTimeout = 0 } = {}) {
   return steps.map(step => {
     if (!step?.name || !Array.isArray(step.command)) throw new Error(`verify step needs a name and a command array: ${JSON.stringify(step)}`);
     if (seen.has(step.name)) throw new Error(`duplicate verify step "${step.name}"`);
+    const unknown = Object.keys(step).filter(key => !STEP_KEYS.includes(key));
+    if (unknown.length) throw new Error(`verify step "${step.name}": ${unknown.map(key => unknownKeyMessage(key, STEP_KEYS)).join("; ")}`);
     if (step.memory !== undefined && !(step.memory >= 0)) throw new Error(`verify step "${step.name}": memory is GiB, a number of 0 or more`);
     if (step.workers !== undefined && !(Number.isInteger(step.workers) && step.workers > 0)) throw new Error(`verify step "${step.name}": workers is a positive integer`);
     if (step.workers && step.usesCores) throw new Error(`verify step "${step.name}": usesCores and workers exclude each other`);

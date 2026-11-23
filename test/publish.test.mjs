@@ -21,7 +21,7 @@ import {
   tagPushRecovery,
 } from "../src/publish.mjs";
 
-import { pyprojectFiles, tempRepository } from "./fixtures.mjs";
+import { tempRepository } from "./fixtures.mjs";
 
 const ready = { token: "t", dirty: false, head: "a".repeat(40), upstream: "a".repeat(40), issues: [], tagExists: false, tag: "v0.2.0" };
 
@@ -121,10 +121,8 @@ test("GIT_COMMITTER_EMAIL sets an annotated tag's tagger without touching git co
   }
 });
 
-test("publish runs the TLS gate before the token reaches any request, and notifies only after tagging", () => {
+test("publish notifies only after tagging", () => {
   const source = readFileSync(new URL("../src/publish.mjs", import.meta.url), "utf8");
-  const gate = source.indexOf("runTlsGate({ requireRegistry: true })");
-  assert.ok(gate > 0 && gate < source.indexOf("resolveToken()"), "the gate runs before the token is read");
   const pushTag = source.slice(source.indexOf("const pushTag = async () => {"), source.indexOf("  if (action === \"done\") {"));
   const tagPush = pushTag.indexOf('git("push", "origin", tag);');
   const notifyCall = pushTag.indexOf("await notifyAll(config.publish.notify, token)");
@@ -193,22 +191,17 @@ test("publish follows release.gate: the local attestation before bun publish, or
   const branch = source.slice(attestation, source.indexOf("} else if", attestation));
   assert.match(branch, /readAttestation\(/);
   assert.match(branch, /if \(attestation\.state !== "passed"\) return fail\(/);
-  // The gate is read before the TLS gate, so a mistyped release.gate fails first.
-  assert.ok(source.indexOf("releaseGate(config)") < source.indexOf("runTlsGate({ requireRegistry: true })"));
+  // The gate is read before the token, so a mistyped release.gate fails first.
+  assert.ok(source.indexOf("releaseGate(config)") < source.indexOf("resolveToken()"));
 });
 
-test("publish refuses a Python package before the TLS gate or any token", async () => {
-  const repository = tempRepository(pyprojectFiles());
-  const { error } = console;
-  const lines = [];
-  console.error = line => lines.push(line);
+test("publish refuses a repository without package.json before any token", async () => {
+  const repository = tempRepository({ "pyproject.toml": '[project]\nname = "example"\nversion = "0.2.0"\n', "repo-kit.config.mjs": "export default {};\n" });
   try {
     const config = withDefaults({});
     config.root = repository.root;
-    assert.equal(await runPublish(config), 1);
-    assert.match(lines.join("\n"), /publish uploads npm packages; this repository's version source is pyproject.toml/);
+    await assert.rejects(runPublish(config), /package\.json not found/);
   } finally {
-    console.error = error;
     repository.cleanup();
   }
 });

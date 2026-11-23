@@ -6,7 +6,6 @@ import test from "node:test";
 
 import { KIT_VERSION, kitReferences } from "../src/check.mjs";
 import { BUN_VERSION } from "../src/token.mjs";
-import { TLS_GATE } from "../src/tls.mjs";
 import { kitRoot } from "./fixtures.mjs";
 
 const workflowsDir = path.join(kitRoot, ".github/workflows");
@@ -27,7 +26,7 @@ test("every reusable workflow sets up Bun through the action at this release's t
     const references = kitReferences(read(path.join(workflowsDir, file)));
     assert.ok(references.some(({ target }) => target === "actions/setup-bun"), file);
     for (const { ref } of references) assert.equal(ref, `v${KIT_VERSION}`, file);
-    assert.doesNotMatch(read(path.join(workflowsDir, file)), /oven-sh\/setup-bun/, `${file} must not bypass the TLS gate`);
+    assert.doesNotMatch(read(path.join(workflowsDir, file)), /oven-sh\/setup-bun/, `${file} must not bypass the action, which pins the Bun floor`);
   }
 });
 
@@ -102,12 +101,21 @@ test("third-party actions are pinned by commit SHA", () => {
   }
 });
 
-test("the action installs the Bun the kit requires and runs the kit's TLS gate before bun install", () => {
+test("the action installs the Bun the kit requires, then runs bun install and nothing else", () => {
   assert.match(action, new RegExp(`bun-version:\\n(?: {4}.*\\n)*? {4}default: "${BUN_VERSION.replaceAll(".", "\\.")}"`));
-  const gate = action.indexOf('run: bun "$GITHUB_ACTION_PATH/../../src/tls-gate.mjs"');
-  assert.ok(gate > 0 && gate < action.indexOf("run: bun install --frozen-lockfile"));
-  assert.equal(path.resolve(kitRoot, "actions/setup-bun", "../../src/tls-gate.mjs"), TLS_GATE);
-  assert.ok(fs.existsSync(TLS_GATE));
+  const steps = action.slice(action.indexOf("  steps:\n")).split("\n").filter(line => /^ {4}- /.test(line));
+  assert.equal(steps.length, 2, steps.join("\n"));
+  assert.match(steps[0], /^ {4}- uses: oven-sh\/setup-bun@/);
+  assert.equal(steps[1], "    - if: inputs.install == 'true'");
+  assert.match(action, /run: bun install --frozen-lockfile/);
+});
+
+test("no action or workflow runs the removed TLS gate", () => {
+  const files = [
+    ...fs.readdirSync(workflowsDir).map(file => path.join(workflowsDir, file)),
+    ...fs.readdirSync(path.join(kitRoot, "actions")).map(dir => path.join(kitRoot, "actions", dir, "action.yml")),
+  ];
+  for (const file of files) assert.doesNotMatch(read(file), /tls-gate|repo-kit tls\b/, path.relative(kitRoot, file));
 });
 
 test("inputs reach shell commands through the environment, not through expressions", () => {
@@ -131,7 +139,7 @@ console.log(JSON.stringify(shapes));`;
   const result = spawnSync("bun", ["-e", script], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const shapes = JSON.parse(result.stdout);
-  assert.deepEqual(shapes["action.yml"], { steps: 3 });
+  assert.deepEqual(shapes["action.yml"], { steps: 2 });
   for (const file of reusable) assert.deepEqual(shapes[file].on, ["workflow_call"], file);
   assert.deepEqual(shapes["check.yml"].on, ["push", "pull_request", "workflow_dispatch"]);
 });

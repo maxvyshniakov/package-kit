@@ -4,7 +4,7 @@
 // HEAD), after `bun run release` was pushed. GITHUB_TOKEN (or `gh auth token`)
 // needs write:packages:
 //
-//   bun run release:publish               TLS gate, the release gate, publish, tag, notify
+//   bun run release:publish               the release gate, publish, tag, notify
 //   bun run release:publish -- --resume   finish a publication whose tag or tag push failed
 //
 // The release gate is release.gate in repo-kit.config.mjs (release-gate.mjs):
@@ -20,7 +20,6 @@ import { client as githubClient, registryUrl, repositoryOf } from "./github.mjs"
 import { notifyAll } from "./notify.mjs";
 import { versionCommitOf } from "./packages.mjs";
 import { attestationRefusal, publishGatePlan, readAttestation, releaseGate } from "./release-gate.mjs";
-import { runTlsGate } from "./tls.mjs";
 import { resolveToken } from "./token.mjs";
 
 export { registryUrl, repositoryOf as githubRepository };
@@ -114,16 +113,11 @@ export async function runPublish(config, { resume = false, fetch: fetcher = glob
     for (const line of lines) console.error(line);
     return 1;
   };
-  const { quickStart, versionSource } = config.changelog;
-  const [pkg, ...others] = changelogPackages(root, { quickStart, versionSource });
+  const { quickStart } = config.changelog;
+  const [pkg, ...others] = changelogPackages(root, { quickStart });
   if (!pkg || others.length) return fail(["Not publishing: expected exactly one released package (the root package or one under packages/)."]);
-  if (!pkg.publishable) {
-    return fail([`Not publishing: repo-kit publish uploads npm packages; this repository's version source is ${pkg.manifestFile}.`]);
-  }
   const tag = `v${pkg.version}`;
   const gate = releaseGate(config);
-  // Before the token reaches any request.
-  if (!runTlsGate({ requireRegistry: true })) return fail([`Not publishing ${pkg.name}@${pkg.version}: the TLS gate failed (README.md#tls-gate).`]);
   const { token, source } = resolveToken();
   if (token && source !== "GITHUB_TOKEN") console.log(`GITHUB_TOKEN unset; publishing with ${source}.`);
   git("fetch", "--quiet", "--tags", "origin", "main");

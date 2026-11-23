@@ -1,6 +1,6 @@
 // Checks every released package's CHANGELOG.md against the changelog policy.
 //
-//   repo-kit check-changelogs            format; package.json or pyproject.toml version = newest release;
+//   repo-kit check-changelogs            format; package.json version = newest release;
 //                                        for a workspace package, bun.lock's entry;
 //                                        quick start archive names; peer ranges
 //   repo-kit check-changelogs --release  also require an empty "## Unreleased"
@@ -11,9 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { parseChangelog, satisfiesCaret } from "./changelog.mjs";
-import { DEFAULT_MANIFEST_FILE, releasedPackages } from "./packages.mjs";
+import { MANIFEST_FILE, releasedPackages } from "./packages.mjs";
 
-export function changelogIssues({ name, version, changelog, lockedVersion, archiveVersions = [], manifestFile = DEFAULT_MANIFEST_FILE }, { release = false, quickStart = "docs/GETTING_STARTED.md" } = {}) {
+export function changelogIssues({ name, version, changelog, lockedVersion, archiveVersions = [] }, { release = false, quickStart = "docs/GETTING_STARTED.md" } = {}) {
   if (changelog === undefined) return ["missing CHANGELOG.md"];
   const parsed = parseChangelog(changelog);
   const issues = [...parsed.errors];
@@ -23,14 +23,14 @@ export function changelogIssues({ name, version, changelog, lockedVersion, archi
   const newest = parsed.releases[0];
   if (!newest) issues.push("no released version");
   else if (newest.version !== version) {
-    issues.push(`${manifestFile} version ${version} does not match the newest changelog release ${newest.version}`);
+    issues.push(`${MANIFEST_FILE} version ${version} does not match the newest changelog release ${newest.version}`);
   }
   if (lockedVersion !== undefined && lockedVersion !== version) {
-    issues.push(`bun.lock records ${lockedVersion} for this workspace; ${manifestFile} says ${version}`);
+    issues.push(`bun.lock records ${lockedVersion} for this workspace; ${MANIFEST_FILE} says ${version}`);
   }
   for (const archiveVersion of archiveVersions) {
     if (archiveVersion !== version) {
-      issues.push(`${quickStart} names the ${archiveVersion} archive; ${manifestFile} says ${version}`);
+      issues.push(`${quickStart} names the ${archiveVersion} archive; ${MANIFEST_FILE} says ${version}`);
     }
   }
   if (release && parsed.unreleased.trim()) {
@@ -59,12 +59,12 @@ export function peerIssues({ peerDependencies = {}, devDependencies = {} }, pack
 }
 
 /** releasedPackages with what changelogIssues and peerIssues read. */
-export function changelogPackages(root, { quickStart = "docs/GETTING_STARTED.md", versionSource } = {}) {
+export function changelogPackages(root, { quickStart = "docs/GETTING_STARTED.md" } = {}) {
   const lockfilePath = path.join(root, "bun.lock");
   const lockfile = fs.existsSync(lockfilePath) ? fs.readFileSync(lockfilePath, "utf8") : "";
   const quickStartPath = quickStart && path.join(root, quickStart);
   const quickStartText = quickStartPath && fs.existsSync(quickStartPath) ? fs.readFileSync(quickStartPath, "utf8") : "";
-  return releasedPackages(root, { versionSource }).map(pkg => {
+  return releasedPackages(root).map(pkg => {
     const changelogPath = path.join(pkg.dir, "CHANGELOG.md");
     return {
       ...pkg,
@@ -79,8 +79,8 @@ export function changelogPackages(root, { quickStart = "docs/GETTING_STARTED.md"
 
 /** Prints each package's result; resolves to whether all passed. */
 export function runCheckChangelogs(config, { release = false } = {}) {
-  const { quickStart, peerScope, versionSource } = config.changelog;
-  const packages = changelogPackages(config.root, { quickStart, versionSource });
+  const { quickStart, peerScope } = config.changelog;
+  const packages = changelogPackages(config.root, { quickStart });
   let failed = false;
   for (const pkg of packages) {
     const issues = [...changelogIssues(pkg, { release, quickStart }), ...peerIssues(pkg, packages, { scope: peerScope })];

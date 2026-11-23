@@ -4,6 +4,30 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+### Breaking
+
+- Repo-Kit is now a kit for Bun JavaScript and TypeScript packages only (repo-kit#23). These commands, exports and options are gone:
+  - `repo-kit tls`, the TLS gate, the `security:tls` script it backed, and its step in `actions/setup-bun`, `release-gate` and `publish`.
+  - `repo-kit adopt` and `@maxvyshniakov/repo-kit/adopt` (with its top-level exports `planAdopt`, `runAdopt` and the rest).
+  - `repo-kit rust` and `@maxvyshniakov/repo-kit/rust`.
+  - `repo-kit publish --prerelease PREID --dist-tag TAG [--dry-run]` and `@maxvyshniakov/repo-kit/publish-prerelease`.
+  - `@maxvyshniakov/repo-kit/perf-budget`. `repo-kit test-hygiene` still treats a call to a `perfBudget` / `perf_budget` helper as a budget; a repository that wants one defines it beside its tests.
+  - `pyproject.toml` version sources (`changelog.versionSource`). `check-changelogs`, `release`, `check-changelog-entries` and `publish` read `package.json` only, and a repository without one fails with "package.json not found".
+
+  `repo-kit tls`, `adopt` and `rust` exit 1 with a message saying what to use instead, and `publish --prerelease` fails the same way. To upgrade, delete the `security:tls` script from `package.json`. Bun 1.4.4, the oldest Bun Repo-Kit and `actions/setup-bun` accept, already rejects the eMudhra chains the gate looked for.
+  No transition period: a cross-repository audit (2026-11-23) found no consumer that calls `adopt`, `rust`, `publish --prerelease`, `perf-budget` or a `pyproject.toml` version source. No verify step or workflow runs `security:tls`, and the Bun floor already checks what the TLS gate checked. Consumers pin exact tags, so nothing changes until one moves its pins, and that same change deletes the script.
+- `repo-kit.config.mjs` is validated when it loads. An unknown section or key fails every command that reads the config. So does an unknown key of a `publish.notify` target or of a verify step (in `verify.steps` and `verify.browser`). The error names the key's path, the nearest known key ("unknown key verify.cheapp; did you mean cheap? It is a key of each verify step") and the keys that section takes. Keys earlier releases read (`adopt`, `rust`, `changelog.versionSource`) instead say which release removed them. Every key the consumer configs set today passes.
+  No transition period: Repo-Kit ignoring a key it doesn't know is the defect being fixed. A warning-only period would keep a typo like `stepTimout` doing nothing in every CI run that doesn't show its log.
+
+### Changed
+
+- Upgrading from 0.6.0 (Data Grid, Sid-Kit and Flow Canvas pin it today) also switches on keys those configs already set but 0.6.0 never read. Since 0.9.0, `cheap: true` runs a step in the cheap-first tier, `verify.canary` adds those checks to `--changed` plans when a `verify.runner` path changes, and `verify.inert` paths change no plan. Check the effect after the bump with `repo-kit verify --changed --plan`.
+- `actions/setup-bun` is now named "Set up Bun". It installs Bun and runs `bun install --frozen-lockfile`, nothing else.
+
+### Deprecated
+
+- `repo-kit friction log|report|export` is moving to Mastack's `friction` command, which already writes the journal. It works as before but prints a deprecation line on stderr, so piped `report --json` and `export` output is unchanged. It will be removed once Mastack ships `report` and `export`.
+
 ## 0.9.0 - 2026-11-22
 
 ### Added

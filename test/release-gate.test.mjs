@@ -183,7 +183,7 @@ esac
   // The pre-push hook runs these tests under its own lease; a browsers path
   // could be set too. Neither may reach the gate under test.
   for (const name of ["SLOTFATHER_LEASE", "SLOTFATHER_COUNT", "PLAYWRIGHT_BROWSERS_PATH"]) delete env[name];
-  const deps = (extra = {}) => ({ env, fetch, tls: () => true, lease: async () => false, platform: "darwin", arch: "arm64", host: "test-mac", softwareChromium: async () => undefined, ...extra });
+  const deps = (extra = {}) => ({ env, fetch, lease: async () => false, platform: "darwin", arch: "arm64", host: "test-mac", softwareChromium: async () => undefined, ...extra });
   const ran = () => {
     const lines = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean).map(line => line.trimEnd()) : [];
     fs.rmSync(log, { force: true });
@@ -220,7 +220,7 @@ test("the gate verifies the exact commit in a clean worktree and records a passe
     // The log holds what ran.
     const log = fs.readFileSync(path.join(fixture.root, ".git/repo-kit-gate", `${fixture.sha.slice(0, 12)}.log`), "utf8");
     assert.match(log, /verify output verify -- --release/);
-    assert.match(log, /TLS gate passed; slotfather lease none/);
+    assert.match(log, /release-gate: slotfather lease none/);
     assert.match(output, /no Playwright in this commit/);
     assert.match(output, /no verify\.browser/);
     // A second run finds the commit attested and runs nothing.
@@ -285,16 +285,13 @@ test("--rerun runs a passed commit again and --no-attest records nothing on GitH
   }
 });
 
-test("the TLS gate and the token come before any install", async () => {
+test("the token comes before any install", async () => {
   const fixture = gateFixture();
   try {
-    const tls = await fixture.gate([], { tls: () => false });
-    assert.equal(tls.result, 1);
-    assert.match(tls.output, /TLS gate failed/);
-    assert.deepEqual(fixture.ran(), []);
     const noToken = await fixture.gate([], { env: { ...fixture.env, PATH: `${path.dirname(fixture.root)}:/usr/bin:/bin`, GITHUB_TOKEN: "" }, tokenSource: () => undefined });
     assert.equal(noToken.result, 1);
     assert.match(noToken.output, /GITHUB_TOKEN/);
+    assert.deepEqual(fixture.ran(), []);
   } finally {
     fixture.cleanup();
   }

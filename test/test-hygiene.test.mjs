@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { perfBudget } from "../src/perf-budget.mjs";
 import { callsPerfHelper, globRegExp, runTestHygiene, sleepFindings, timingFindings, uiFindings } from "../src/test-hygiene.mjs";
 import { isolatedGitEnv, kitRoot } from "./fixtures.mjs";
 
@@ -98,15 +97,6 @@ test("globs: ** spans directories, * one segment, braces alternatives", () => {
   assert.ok(!globRegExp("test/*.mjs").test("test/sub/a.mjs"));
   assert.ok(globRegExp("test/**/*.mjs").test("test/a.mjs"));
   assert.ok(!globRegExp("**/*.test.ts").test("a.test.tsx"));
-});
-
-test("perfBudget reports outside the perf suite and fails inside it", () => {
-  const warnings = [];
-  const warn = message => warnings.push(message);
-  assert.doesNotThrow(() => perfBudget(false, "render under 16 ms", { env: {}, warn }));
-  assert.match(warnings[0], /perf budget missed \(not enforced outside the perf suite\): render under 16 ms/);
-  assert.throws(() => perfBudget(false, "render under 16 ms", { env: { REPO_KIT_PERF_BUDGETS: "enforce" }, warn }), /perf budget missed: render under 16 ms/);
-  assert.doesNotThrow(() => perfBudget(true, "fine", { env: { REPO_KIT_PERF_BUDGETS: "enforce" }, warn }));
 });
 
 function repository(files, config = "export default {};\n") {

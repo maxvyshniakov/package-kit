@@ -20,8 +20,8 @@ commands and pins the version that verifies them.
 It is useful for a library or a family of libraries sharing Bun, Git and GitHub-based publishing. Tests and builds
 remain your commands. Browser/Storybook checks, package-consumer probes and release notifications are optional.
 Consumer commands and configuration run with the invoking account's privileges; verification is not a sandbox.
-The publisher currently expects one publishable package; changelog/release helpers also understand workspaces and
-Python packages, whose version lives in `pyproject.toml`.
+The publisher currently expects one publishable package; changelog/release helpers also understand workspaces. Every
+released package keeps its version in `package.json`.
 
 ## Status
 
@@ -37,7 +37,7 @@ the [changelog](CHANGELOG.md). Use it as is, fork it, or borrow its ideas. Issue
 | --- | --- |
 | Consumer | A repository that installs Repo-Kit and declares its checks in `repo-kit.config.mjs`. |
 | Step / check | One command from that configuration, with its dependencies, memory and timeout. |
-| Gate | A check whose result decides something: the pre-push gate, the release gate, the TLS gate. |
+| Gate | A check whose result decides something: the pre-push gate, the release gate. |
 | Slot, lease | A unit of machine capacity and a running command's reservation of it, both from [Slotfather](https://github.com/maxvyshniakov/fathers/tree/main/slotfather). Without Slotfather nothing is leased. |
 | Lane | Lanefather's unit of parallel work: a task with a worktree, path claims and a verification receipt. |
 | Catalog | A library's Storybook, built and deployed by the optional Storybook workflow. |
@@ -127,6 +127,9 @@ that consume another step's output, and `inputs` globs to run only the steps a c
 together when their declared memory fits. Output streams with step names, and a failed or timed-out command fails
 the run.
 
+Repo-Kit rejects a key it does not know, in the config or in a step, with its path and the nearest known key
+(`unknown key verify.stepTimout; did you mean verify.stepTimeout?`), so a typo fails instead of doing nothing.
+
 [Configuration and workspace examples](docs/reference.md#repo-kitconfigmjs) ·
 [Change-aware selection and planning](docs/reference.md#change-aware-selection-and-planning) ·
 [Memory and worker budgets](docs/reference.md#step-memory)
@@ -199,10 +202,9 @@ went through lane landing still needs separate publication reconciliation.
 | Cut versions and changelogs | `repo-kit release` |
 | Verify an exact release revision | `repo-kit release-gate <ref>` |
 | Publish that verified revision | `repo-kit publish` |
-| Pick the newest compatible `@maxvyshniakov/*` set | `repo-kit adopt [--json] [--apply] [--only <names>]` |
 | Capture a catalog story | `repo-kit shoot` |
 | Keep fixed sleeps and timing asserts out of tests, shrink-only | `repo-kit test-hygiene` |
-| Record and rank agent friction with packages | `repo-kit friction log\|report\|export` |
+| Record and rank agent friction with packages (deprecated: moving to Mastack) | `repo-kit friction log\|report\|export` |
 
 [Full command reference](docs/reference.md#commands) · [Story screenshots](docs/reference.md#story-screenshots) · [Friction journal](docs/reference.md#friction-journal)
 
@@ -252,16 +254,6 @@ Use `read:packages` for installation and the required write scopes only for publ
 Local commands that need GitHub access can fall back to `gh auth token`; CI uses the caller's workflow token and
 package access settings. [Authentication reference](docs/reference.md#github_token) ·
 [GitHub Packages permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages)
-
-## TLS gate
-
-Setup and publishing check the Bun runtime before installation or credential use. The gate is offline and takes
-milliseconds: Bun 1.4.4 or later, and none of the eMudhra incident roots in its root store or in the bundles that
-`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and `SSL_CERT_DIR` name, the CA variables Bun 1.4.4 reads (a Homebrew CA bundle
-passes). A bundle path it cannot read, one without certificates, or a store it cannot read offline (`NODE_USE_SYSTEM_CA`,
-`--use-system-ca`) fails, unless `REPO_KIT_TLS_ALLOW_CA_ENV=1` lets it through unchecked; an incident root always fails.
-A live probe of the incident hosts runs beside it until 2027-02-01: it fails only when such a host answers, and
-timeouts or DNS errors only warn. Publishing also needs `registry.npmjs.org` to answer. [Exact checks and boundaries](docs/reference.md#tls-gate)
 
 ## Versioning
 

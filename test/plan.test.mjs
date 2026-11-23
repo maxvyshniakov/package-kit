@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { withoutYield, yieldRequested, yieldSlots } from "../src/heavy.mjs";
+import { withoutYield, yieldRequested, yieldSlots } from "../src/slotfather.mjs";
 import {
   applyScopeArgs,
   changedPaths,

@@ -175,9 +175,9 @@ function manifestVersion(pkg, text) {
 
 /** The rules of the repository's config; [] when changelog.paths is unset. */
 export function configuredRules(config) {
-  const { paths, versionSource } = config.changelog;
+  const { paths } = config.changelog;
   if (paths === undefined || paths === null) return [];
-  return compileRules(paths, releasedPackages(config.root, { versionSource }));
+  return compileRules(paths, releasedPackages(config.root));
 }
 
 function reader(cwd, revision) {

@@ -18,8 +18,6 @@ const USAGE = `Usage: repo-kit <command>
   test-hygiene [--init|--update]   shrink-only test rules: fixed sleeps, timing assertions, UI assertions (opt-in)
   file-budget [--staged] [--all] [--init|--update] [--json]
                                    per-glob file-size budgets (lines or bytes) and a shrink-only allowlist
-  adopt [--json] [--apply] [--only <names>]
-                                   pick the newest compatible set of @maxvyshniakov/* packages for a consumer
   hooks <install|sync|check|status>
   check [file-budget]              managed hooks, workflow references and packageManager match the kit
   check-changelogs [--release]
@@ -31,14 +29,25 @@ const USAGE = `Usage: repo-kit <command>
                                    the local release gate on a commit (default HEAD); records its commit status
   release-gate --mode              print release.gate: local or ci
   ci-gate                          in a workflow: whether a job that needs the checks runs (REPO_KIT_NEEDS)
-  publish [--resume] | publish --prerelease PREID --dist-tag TAG [--dry-run]
+  publish [--resume]
   notify                           request publish.notify's workflows again
-  tls                              the Bun TLS gate
-  friction <log|report|export>     the local agent friction journal (repo-kit friction help)
-  rust <cache|toolchain|msrv>      shared Cargo build cache, pinned toolchain preflight and MSRV check
+  friction <log|report|export>     deprecated: the local agent friction journal, moving to mastack
   packed-consumer [--keep]`;
 
+// Commands 0.10.0 removed: each exits 1 with what to do instead.
+export const REMOVED_COMMANDS = {
+  tls: "repo-kit tls was removed in 0.10.0: Bun 1.4.4, the floor repo-kit and its setup-bun action require, already rejects the eMudhra chains. Delete the security:tls script.",
+  adopt: "repo-kit adopt was removed in 0.10.0: bump @maxvyshniakov/* pins by hand, or with bun update.",
+  rust: "repo-kit rust was removed in 0.10.0: repo-kit covers Bun JavaScript and TypeScript packages only. Run cargo directly.",
+};
+
+export const FRICTION_DEPRECATION = "repo-kit friction is deprecated and moves to mastack's friction command; it will be removed in a later release.";
+
 export async function main([command, ...args]) {
+  if (Object.hasOwn(REMOVED_COMMANDS, command)) {
+    console.error(REMOVED_COMMANDS[command]);
+    return 1;
+  }
   if (command === "heavy") {
     const [slots, ...rest] = args;
     if (!slots || !rest.length) return usage();
@@ -87,55 +96,15 @@ export async function main([command, ...args]) {
     }
     return runFileBudget({ root: config.root, config, args: budgetArgs });
   }
-  if (command === "adopt") {
-    const [{ findRoot, loadConfig, withDefaults }, { runAdopt }] = await Promise.all([import("./config.mjs"), import("./adopt.mjs")]);
-    let root = null;
-    try {
-      root = findRoot();
-    } catch {
-      // No repo-kit.config.mjs: resolve the Git top-level directory or cwd.
-    }
-    let config;
-    if (root) config = await loadConfig(root);
-    else {
-      const { execFileSync } = await import("node:child_process");
-      let fallbackRoot = process.cwd();
-      try {
-        fallbackRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-      } catch {
-        // Not a git checkout; use cwd.
-      }
-      config = { root: fallbackRoot, ...withDefaults({}) };
-    }
-    return runAdopt({ root: config.root, config, args });
-  }
   if (command === "friction") {
+    // stderr only: `friction report --json` and `friction export` output may be piped.
+    console.error(FRICTION_DEPRECATION);
     const { runFriction } = await import("./friction.mjs");
     return runFriction(args);
   }
   if (command === "serve") {
     const { runServe } = await import("./serve.mjs");
     return runServe(args);
-  }
-  if (command === "rust") {
-    const [{ findRoot, loadConfig }, { runRust }] = await Promise.all([import("./config.mjs"), import("./rust.mjs")]);
-    let root = null;
-    try {
-      root = findRoot();
-    } catch {
-      // Repositories without repo-kit.config.mjs run with defaults/CLI flags.
-    }
-    const config = root ? await loadConfig(root) : { root: process.cwd() };
-    return runRust(args, { config, root: config.root });
-  }
-  if (command === "tls") {
-    const { runTlsGate } = await import("./tls.mjs");
-    const unknown = args.filter(arg => arg !== "--offline" && arg !== "--require-registry");
-    if (unknown.length) {
-      console.error(`repo-kit tls: unknown option ${unknown.join(" ")} (use --offline, --require-registry)`);
-      return 2;
-    }
-    return runTlsGate({ args }) ? 0 : 1;
   }
   if (!command || command === "help" || command === "--help") return usage(0);
 
@@ -237,10 +206,9 @@ export async function main([command, ...args]) {
     }
     case "publish": {
       if (args.some(arg => arg === "--prerelease" || arg.startsWith("--prerelease=") || arg === "--dist-tag" || arg.startsWith("--dist-tag=") || arg === "--dry-run")) {
-        const { parsePrereleaseOptions, runPrerelease } = await import("./publish-prerelease.mjs");
-        return runPrerelease(config, parsePrereleaseOptions(args));
+        throw new Error("publish --prerelease was removed in 0.10.0; publish a release with `repo-kit release` and `repo-kit publish`");
       }
-      if (args.some(arg => arg !== "--resume")) throw new Error("Unknown publish option; use --prerelease PREID --dist-tag TAG for integration publication");
+      if (args.some(arg => arg !== "--resume")) throw new Error("Unknown publish option; the only one is --resume");
       const { runPublish } = await import("./publish.mjs");
       return runPublish(config, { resume: args.includes("--resume") });
     }

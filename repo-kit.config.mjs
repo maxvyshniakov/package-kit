@@ -9,7 +9,7 @@ const VERSIONED_FILES = [".github/workflows", "README.md", "docs/reference.md", 
 
 export default {
   prePush: { releaseBranches: [] },
-  // The rules' own test holds their examples and calls perfBudget to test it.
+  // The rules' own test holds their examples of perfBudget calls and timing assertions.
   testHygiene: { exclude: ["**/node_modules/**", "test/test-hygiene.test.mjs"] },
   verify: {
     // Its steps take seconds; a hung one fails well inside check.yml's 15 minutes.
@@ -35,9 +35,9 @@ export default {
         const lane = run("node_modules/.bin/repo-kit-lane", ["--help"], { cwd: consumerDir });
         if (lane.status === 0 && lane.stdout.includes("Usage: repo-kit-lane")) ok("node_modules/.bin/repo-kit-lane runs");
         else fail(`node_modules/.bin/repo-kit-lane --help exited ${lane.status}:\n${lane.stdout}${lane.stderr}`);
-        // The friction module reads the contract it ships with when it loads.
+        // The friction module reads the contract it ships with when it loads; its deprecation goes to stderr only.
         const friction = run("node_modules/.bin/repo-kit", ["friction", "help"], { cwd: consumerDir });
-        if (friction.status === 0 && friction.stdout.includes("repo-kit friction log")) ok("repo-kit friction loads its shipped contract");
+        if (friction.status === 0 && friction.stdout.includes("repo-kit friction log") && friction.stderr.includes("repo-kit friction is deprecated")) ok("repo-kit friction loads its shipped contract");
         else fail(`repo-kit friction help exited ${friction.status}:\n${friction.stdout}${friction.stderr}`);
         const serve = run("node_modules/.bin/repo-kit", ["serve", "--help"], { cwd: consumerDir });
         if (serve.status === 0 && serve.stdout.includes("Usage: repo-kit serve <dir>")) ok("repo-kit serve runs from packed consumer");

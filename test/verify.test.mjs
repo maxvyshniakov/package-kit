@@ -664,7 +664,6 @@ test("the run's slots: SLOTFATHER_COUNT under a lease, else one", () => {
 test("verify modules stay under 300 lines and only slotfather.mjs touches slotfather or SLOTFATHER_*", () => {
   const splitFiles = [
     "src/slotfather.mjs",
-    "src/heavy.mjs",
     "src/verify.mjs",
     "src/verify/steps.mjs",
     "src/verify/budget.mjs",
@@ -676,7 +675,6 @@ test("verify modules stay under 300 lines and only slotfather.mjs touches slotfa
     assert.ok(lines <= 300, `${rel} has ${lines} lines (> 300)`);
   }
   const checkedModules = [
-    "src/heavy.mjs",
     "src/verify.mjs",
     "src/verify/steps.mjs",
     "src/verify/budget.mjs",

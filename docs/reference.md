@@ -38,7 +38,6 @@ The command names stay as they were, so instructions and skills that name them k
     "check:consumer": "repo-kit packed-consumer",
     "release": "repo-kit release",
     "release:publish": "repo-kit publish",
-    "security:tls": "repo-kit tls",
     "shoot:stories": "repo-kit shoot"
   }
 }
@@ -97,7 +96,6 @@ export default {
   changelog: {
     quickStart: "docs/GETTING_STARTED.md", // archive names checked and moved by release, when the file exists
     peerScope: "@maxvyshniakov/",          // peer ranges checked against workspace versions and exact devDependency pins
-    versionSource: "package.json",         // or "pyproject.toml"; default package.json, pyproject.toml without a root package.json
     paths: ["packages/sid-kit/src/**"],    // shipped paths: the changelog-entry guard (Changelog entries); default none, off
   },
   hooks: {
@@ -118,12 +116,23 @@ export default {
 The released package is the one directory under `packages/` with a `package.json`, or the root package when there is
 no `packages/`. `release` and `check-changelogs` handle several workspace packages; `publish` expects exactly one.
 
-`changelog.versionSource: "pyproject.toml"` reads each package's name and version from `pyproject.toml`'s `[project]`
-table instead (`name = "..."`, `version = "x.y.z"`, each on one line; a `dynamic` version is not supported), with the
-same layout rule: each directory under `packages/` holding a `pyproject.toml`, else the root. A repository without a
-root `package.json` uses it without the setting. `release` then sets that `version` line and nothing else in the file;
-`bun.lock` and quick-start archives are npm-only and not touched. `publish` refuses such a package, and
-`packed-consumer` is npm-only.
+Every released package keeps its name and version in `package.json`; a repository without one fails with
+"package.json not found". `changelog.versionSource` and `pyproject.toml` packages were removed in 0.10.0.
+
+### Unknown keys
+
+`loadConfig` rejects a key it does not know before any command runs: an unknown section, an unknown key of a section
+or of a `publish.notify` target, and, when the steps are built, an unknown key of a step in `verify.steps` or
+`verify.browser`. The error names the key's path, the nearest known key and the keys the section takes:
+
+```text
+repo-kit: repo-kit.config.mjs:
+  unknown key verify.cheapp; did you mean cheap? It is a key of each verify step (known: steps, browser, slots, ...)
+  adopt: repo-kit adopt was removed in 0.10.0; delete the adopt section
+```
+
+The keys are `CONFIG_KEYS`, `NOTIFY_KEYS` and `STEP_KEYS` in `src/config.mjs`; a test keeps them equal to the keys
+`src/` reads.
 
 ### Steps side by side
 
@@ -219,23 +228,22 @@ export default {
 | `hooks sync` | Writes the managed hooks into `.githooks`: a `pre-push` shim and `reference-transaction`; `lane-check` with a `.lanefather.toml`; `commit-msg` with `changelog.paths`. `hooks.managed` keeps only the named ones. Other hooks there are the repository's own, and an existing `commit-msg` of its own is never replaced. |
 | `hooks check` / `hooks status` | The tracked managed hooks match the kit / Git would run every tracked hook. |
 | `check` | `hooks check`. Every `maxvyshniakov/repo-kit/...@` reference in `.github/workflows` names the installed version. `packageManager` names `bun@1.4.4`. |
-| `check-changelogs [--release]` | Changelog format, version agreement (`package.json` or `pyproject.toml`, the newest release, `bun.lock`, quick start archives) and peer ranges. `--release`: no unreleased entries. |
+| `check-changelogs [--release]` | Changelog format, version agreement (`package.json`, the newest release, `bun.lock`, quick start archives) and peer ranges. `--release`: no unreleased entries. |
 | `check-changelog-entries <base>..<head>` | The [changelog-entry guard](#changelog-entries) on every commit of the range. Without `changelog.paths`, nothing. |
 | `commit-msg <message file>` | Runs from `.githooks/commit-msg`: the same guard on the commit being made. Skip once with `git commit --no-verify`. |
-| `release [<package>:]<patch\|minor\|major\|x.y.z> [--date=]` | Cuts `## Unreleased` into a version; sets `package.json` (or `pyproject.toml`), `bun.lock` and the quick start. |
-| `release-gate [<ref>] [--rerun] [--no-attest]` | The local [release gate](#release-gate) on a commit (default `HEAD`): a clean worktree, frozen install, `verify --release`, `verify --browser` with Chromium in software compositing, the TLS gate; records the commit status `Library checks (local, <os>-<arch>)`, such as `(local, darwin-arm64)`. `--mode` prints `release.gate`. |
+| `release [<package>:]<patch\|minor\|major\|x.y.z> [--date=]` | Cuts `## Unreleased` into a version; sets `package.json`, `bun.lock` and the quick start. |
+| `release-gate [<ref>] [--rerun] [--no-attest]` | The local [release gate](#release-gate) on a commit (default `HEAD`): a clean worktree, frozen install, `verify --release`, `verify --browser` with Chromium in software compositing; records the commit status `Library checks (local, <os>-<arch>)`, such as `(local, darwin-arm64)`. `--mode` prints `release.gate`. |
 | `ci-gate` | In a workflow job that needs the checks (`deploy-storybook.yml`): writes `run=true` under gate `local`, or under gate `ci` when every job in `REPO_KIT_NEEDS` (the caller's `toJSON(needs)`) passed. |
-| `publish [--resume]` | TLS gate; HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes, checks the registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication. |
+| `publish [--resume]` | HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes, checks the registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication. |
 | `notify` | Requests `publish.notify`'s workflows again. |
 | `heavy <slots\|all> <command...>` | Runs a command under `slotfather run -n <slots>` when slotfather is on PATH and no lease is held; otherwise directly. |
-| `tls` | The TLS gate (below). |
 | `packed-consumer [--keep]` | Packs, installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
 | `shoot <story id filter...> [<url>\|--url=] [--theme=] [--width=] [--browser=] [--out=] [--viewport]` | [Story screenshots](#story-screenshots) from a running Storybook, under a lease of `shoot.slots`. |
 | `serve <dir> [--port N] [--host 127.0.0.1]` | Dependency-free HTTP/1.1 Keep-Alive [static preview server](#static-preview-server) (`@maxvyshniakov/repo-kit/serve`): high socket backlog (`2048`), `Cache-Control: no-cache` for `.html` and `.json`, `public, max-age=31536000, immutable` for hashed `/assets/*`, path-traversal guard (`403`) and clean MIME types. Use instead of `python3 -m http.server`. |
 | `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `repo-kit.config.mjs` too. |
 | `verified-tree` | In a workflow: links each `REPO_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
-| `friction <log\|report\|export>` | The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `repo-kit.config.mjs`. |
-| `adopt [--json] [--apply] [--only <names>]` | Inspects `@maxvyshniakov/*` pins (registry pins and `file:.../*.tgz` vendored archives) across the consumer's `package.json` files, queries GitHub Packages metadata, and picks the newest stable compatible set that satisfies every intra-set `peerDependencies` range (respecting `adopt.hold`). Read-only by default: exits `0` when up to date, `10` when a newer compatible set exists, and `1` (warning, changing nothing) on lookup failure. With `--apply`, updates registry pins via `bun add --exact` and vendored archives by downloading `<scope>-<name>-<version>-<sha12>.tgz` into `adopt.vendorDir` (or the existing archive's directory) followed by `bun install`. Configured via `adopt: { vendorDir, packages, hold: { name: "reason" } }`. |
+| `friction <log\|report\|export>` | Deprecated, moving to Mastack's `friction`; prints a deprecation line on stderr. The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `repo-kit.config.mjs`. |
+| `tls`, `adopt`, `rust` | Removed in 0.10.0: each exits 1 and says what to use instead. `publish --prerelease` likewise. |
 
 ## Test hygiene
 
@@ -273,10 +281,10 @@ testHygiene: {
 },
 ```
 
-`perfBudget(holds, message)` from `@maxvyshniakov/repo-kit/perf-budget` states a budget: under
-`REPO_KIT_PERF_BUDGETS=enforce`, which the perf suite sets when it runs alone on a quiet machine, a missed budget
-fails; elsewhere it is reported and the test goes on. A Python or Swift repository defines `perf_budget` /
-`perfBudget` beside its tests with the same contract.
+A budget goes through a `perfBudget(holds, message)` / `perf_budget` helper the repository defines beside its tests:
+it fails a missed budget only in the perf suite, which runs alone on a quiet machine, and elsewhere reports it and
+lets the test go on. `test-hygiene` recognises the helper by its name. (Repo-Kit shipped one as
+`@maxvyshniakov/repo-kit/perf-budget` until 0.10.0.)
 
 ### Adopting it
 
@@ -624,7 +632,7 @@ bun run release:publish
 `repo-kit release-gate [<ref>]` (default `HEAD`) runs under one slotfather lease (the larger of `verify.slots` and
 `verify.browserSlots`):
 
-1. the TLS gate, the Bun floor and the token, before any install;
+1. the Bun floor and the token, before any install;
 2. a clean temporary worktree of the exact commit and `bun install --frozen-lockfile`;
 3. when the commit has Playwright: `bunx playwright install --no-shell chromium` (as `browser.yml` does), then a mirror
    of Playwright's browsers directory in which every Chromium executable starts the real one with `--disable-gpu`.
@@ -698,52 +706,6 @@ repositories needs it, when the lockfile contains those packages:
 - **CI:** the workflow token. The caller grants `packages: read`, and the package's Actions access lists the repository
   (Package settings → Manage Actions access).
 
-## TLS gate
-
-Bun 1.3.14 trusted the compromised eMudhra chains ([incident write-up](https://emudhra.we-have-a-problem.com/));
-Bun 1.4.4 rejects all 12 fixtures, because its root store no longer holds the roots they chain to.
-
-`src/tls-gate.mjs` runs on the actual Bun runtime and needs nothing installed. The gate is offline and deterministic
-(about 2 ms):
-
-- the runtime is Bun 1.4.4 or later;
-- `tls.rootCertificates` holds none of the incident roots, by SHA-256 fingerprint: emSign ECC Root CA - G3,
-  emSign Root TLS CA - G3, emSign Root CS CA - G3, and AAA Certificate Services (the Sectigo cross-signs chain to it);
-- the bundles the CA variables Bun 1.4.4 reads name hold none of them either. Bun 1.4.4 adds the certificates of
-  `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE` (PEM files) and `SSL_CERT_DIR` (directories, separated like `PATH`) to
-  both its `fetch` and `https` clients, with or without `--use-openssl-ca`, so the gate reads each of them: every PEM
-  certificate (also OpenSSL's `TRUSTED CERTIFICATE` form) in the file, and in each directory the files OpenSSL's
-  lookup loads (`<subject hash>.<n>`, such as `3c58f906.0`; not the `.r<n>` CRLs) and any `.pem` or `.crt` beside them.
-  A certificate whose SHA-256 fingerprint is an incident root's fails the gate, naming the variable, the file and the
-  certificate's subject. Bun ignores `npm_config_cafile` and `npm_config_ca`, which are not inspected;
-- what the gate cannot verify fails: a variable naming a path it cannot read, a file or directory with no certificate
-  it can parse, and stores it cannot read offline, the operating system's (`NODE_USE_SYSTEM_CA`, `--use-system-ca` in
-  `NODE_OPTIONS` or `BUN_OPTIONS`) and OpenSSL's default store (`--use-openssl-ca` without `SSL_CERT_FILE` or
-  `SSL_CERT_DIR`). `REPO_KIT_TLS_ALLOW_CA_ENV=1` lets exactly these through unchecked, as warnings; it never allows a
-  bundle that holds an incident root. A `cafile` or `ca` in a repository's `.npmrc` or `bunfig.toml` is repository
-  content, reviewed with it, and not checked here.
-
-The live probe is secondary. It asks `registry.npmjs.org` and the 12 `*.we-have-a-problem.com` incident hosts with
-both the `fetch` and `https` clients, all side by side (10 s timeout each; about 0.5 s when they answer). It fails
-only on positive evidence of trust, an incident host that answers. A trust-chain rejection passes; a timeout, DNS error
-or any other failure prints a warning and does not block, because it proves nothing either way. `registry.npmjs.org`
-must answer for `publish` (`--require-registry`); elsewhere its failure warns.
-
-**Sunset:** from 2027-02-01 (`LIVE_PROBE_SUNSET`) the live probe no longer asks the incident hosts, and it is to be
-removed. The offline gate stays.
-
-`bun src/tls-gate.mjs --offline` (or `repo-kit tls --offline`) runs the gate alone.
-
-Where it runs:
-
-- the composite action runs it before `bun install`;
-- `release-gate` runs it before installing;
-- `publish` runs it, with `--require-registry`, before the token reaches any request;
-- the pre-push hook refuses a local Bun older than 1.4.4.
-
-Each environment has its own trust boundary. Node, Git, downloaded actions and containers need their own
-verification. Do not disable certificate verification.
-
 ## Workflows
 
 The caller keeps `.github/workflows/check.yml` (publish waits for it under gate `ci`; under gate `local` it is
@@ -798,7 +760,7 @@ the default branch's own workflow, not a fork's.
 
 Every heavy step of these workflows runs under a slotfather lease where the runner has slotfather: `verify`, the
 browser build and checks, the Storybook builds and `storybook:prepare-deploy`, and the release command. What runs
-outside one is light: checkout, the TLS gate, `bun install`, the cached Playwright browser and the Cloudflare upload.
+outside one is light: checkout, `bun install`, the cached Playwright browser and the Cloudflare upload.
 `slots` defaults to `all`, the whole runner, so no heavy job runs beside another and each gets the runner's memory; a job waits
 for the lease instead. `verify.yml` passes `slots` to verify as `REPO_KIT_VERIFY_SLOTS`, which overrides
 `verify.slots` and `verify.browserSlots`.
@@ -876,7 +838,7 @@ its checks) and `deploy / Publish private Storybook`.
 
 A cancelled run counts as failed for `publish` under gate `ci`, so `cancel-in-progress` covers pull requests only.
 
-`actions/setup-bun` installs Bun 1.4.4, runs the TLS gate, then `bun install --frozen-lockfile` with `token`.
+`actions/setup-bun` installs Bun 1.4.4, then runs `bun install --frozen-lockfile` with `token`.
 Jobs that do not use a reusable workflow call it directly:
 `uses: maxvyshniakov/repo-kit/actions/setup-bun@v0.9.0`.
 
@@ -954,24 +916,3 @@ When Lanefather's canonical hook changes:
 1. copy it here;
 2. update the hash;
 3. release.
-
-## Integration prereleases
-
-`repo-kit publish --prerelease integration --dist-tag integration` publishes the
-captured full HEAD SHA from a temporary Git archive. It requires a clean tree
-and exactly one npm package. It does not require the stable release gate,
-change checkout versions, create Git tags, push refs, or notify consumers.
-The TLS gate still runs before authenticated registry requests.
-
-The explicit dist-tag must not be `latest`. Uploading requires an existing stable
-`latest` version because a first publication can assign `latest` even when a
-different tag was requested. Dry-run remains available for a new package. The next prerelease number follows
-the matching identifier on the registry; its base is the next minor after the
-newest stable version, or the next major for a breaking changelog entry at
-1.0.0 and above. `--dry-run` installs and packs without uploading, including the package’s prepack hooks.
-The runner packs once, validates the archived package name, version and `gitHead`,
-and uploads that exact tarball without rerunning lifecycle hooks. A configured
-Python version source is refused even when tooling supplies a package.json.
-Project policy still owns authorization and any integration-branch restriction.
-The programmatic `publish-prerelease` export supplies the same runner and
-version/archive helpers so consumer scripts need not duplicate token or publish code.

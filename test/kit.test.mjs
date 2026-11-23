@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { KIT_VERSION, kitIssues, kitReferences, packageManagerIssues, workflowIssues } from "../src/check.mjs";
-import { leasedCommand, runLeased } from "../src/heavy.mjs";
+import { leasedCommand, runLeased } from "../src/slotfather.mjs";
 import { hookIssues, hookStatus, installHooks, managedHooks, REFERENCE_TRANSACTION_SHA256, sha256, syncHooks } from "../src/hooks.mjs";
 import { bunTooOld, BUN_VERSION, resolveToken } from "../src/token.mjs";
 import { kitRoot, tempRepository } from "./fixtures.mjs";
@@ -167,7 +167,7 @@ test("repo-kit heavy forwards SIGTERM to its command but not SIGINT, which the c
   const repository = tempRepository({});
   try {
     const log = path.join(repository.root, "signals");
-    const script = `import { runLeased } from ${JSON.stringify(path.join(kitRoot, "src/heavy.mjs"))};
+    const script = `import { runLeased } from ${JSON.stringify(path.join(kitRoot, "src/slotfather.mjs"))};
 const done = runLeased(1, ["sh", "-c", ${JSON.stringify(`trap 'echo INT >> ${log}' INT; trap 'echo TERM >> ${log}; exit 143' TERM; echo ready; while :; do sleep 0.1; done`)}], { env: { ...process.env, SLOTFATHER_LEASE: "outer" } });
 process.once("SIGINT", () => setImmediate(() => console.log("sigint-handled")));
 process.exitCode = await done;`;
@@ -218,7 +218,7 @@ test("self hook sync retires only its unchanged old branch guard", () => {
 });
 
 test("a lease label names the project and what runs, never a bare directory", async () => {
-  const { slotLabel, projectName } = await import("../src/heavy.mjs");
+  const { slotLabel, projectName } = await import("../src/slotfather.mjs");
   // A worktree's own directory is not the project: the main checkout's is.
   assert.equal(projectName(kitRoot), "repo-kit");
   assert.equal(slotLabel("release-gate", { env: {}, cwd: kitRoot }), "repo-kit release-gate");

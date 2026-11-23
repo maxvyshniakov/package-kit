@@ -9,8 +9,7 @@
 // temporary worktree of the exact commit, under one slotfather lease: a frozen
 // install, `verify --release`, and `verify --browser` when the repository
 // declares browser checks, with every Playwright Chromium started with software
-// compositing (chromium.mjs), as on the Linux CI runner. The TLS gate runs
-// first. The result goes to GitHub as the commit status "Library checks
+// compositing (chromium.mjs), as on the Linux CI runner. The result goes to GitHub as the commit status "Library checks
 // (local, <os>-<arch>)" (darwin-arm64: verified-tree counts it only for that platform), with a short summary that names the local log
 // (.git/repo-kit-gate/<sha>.log). A commit that passed is recorded in
 // .git/repo-kit-gate/passed and is not run again; the next run only records the
@@ -30,8 +29,7 @@ import { SOFTWARE_SWITCHES, compositingStatus, defaultBrowsersPath, playwrightCh
 import { passedRecord, trapSignals, verifyCommands, withCommitWorktree } from "./commit-check.mjs";
 import { cleanEnvironment, commonGitDir, gitRunner } from "./git.mjs";
 import { client as githubClient, repositoryOf } from "./github.mjs";
-import { leaseSelf } from "./heavy.mjs";
-import { runTlsGate } from "./tls.mjs";
+import { leaseSelf } from "./slotfather.mjs";
 import { TOKEN_HINT, resolveToken } from "./token.mjs";
 import { KIT_VERSION, bunTooOld, localBunVersion } from "./toolchain.mjs";
 
@@ -218,7 +216,6 @@ export async function runReleaseGate(config, args = [], deps = {}) {
   const {
     env = process.env,
     fetch: fetcher = globalThis.fetch,
-    tls = () => runTlsGate({ env }),
     lease = leaseSelf,
     platform = process.platform,
     arch = process.arch,
@@ -290,7 +287,6 @@ export async function runReleaseGate(config, args = [], deps = {}) {
 
   const tooOld = bunTooOld(localBunVersion());
   if (tooOld) return fail(`release-gate: ${tooOld}.`);
-  if (!tls()) return fail("release-gate: the TLS gate failed (README.md#tls-gate); nothing was installed.");
   if (token && source && source !== "GITHUB_TOKEN") print(`release-gate: GITHUB_TOKEN unset; using ${source}.`);
   if (options.attest && !(await github.hasCommit(sha))) {
     print(`release-gate: GitHub does not have ${short} yet. The gate runs; push the commit, then run it again to record the attestation.`);
@@ -335,7 +331,7 @@ export async function runReleaseGate(config, args = [], deps = {}) {
       });
 
       say(`release-gate: ${short} (${options.ref}) in ${worktree}, repo-kit ${KIT_VERSION}, log ${logFile}\n`);
-      say(`release-gate: TLS gate passed; slotfather lease ${env.SLOTFATHER_LEASE ? `${env.SLOTFATHER_LEASE} (${env.SLOTFATHER_COUNT ?? "?"} slots)` : "none"}\n`);
+      say(`release-gate: slotfather lease ${env.SLOTFATHER_LEASE ? `${env.SLOTFATHER_LEASE} (${env.SLOTFATHER_COUNT ?? "?"} slots)` : "none"}\n`);
       let ok = await timed("install", () => step("install", "bun", ["install", "--frozen-lockfile"]));
       let commands = {};
       if (ok) {

@@ -19,7 +19,7 @@ import {
 import { withDefaults } from "../src/config.mjs";
 import { hookIssues, managedHooks, syncHooks } from "../src/hooks.mjs";
 import { runRelease } from "../src/release.mjs";
-import { changelog, isolatedGitEnv, kitRoot, pyprojectFiles, rootPackageFiles, tempRepository, workspaceFiles } from "./fixtures.mjs";
+import { changelog, isolatedGitEnv, kitRoot, rootPackageFiles, tempRepository, workspaceFiles } from "./fixtures.mjs";
 
 const quiet = fn => {
   const { log, error } = console;
@@ -56,13 +56,13 @@ function guarded(files = rootPackageFiles({ "repo-kit.config.mjs": configText(),
 }
 
 test("compileRules and shippedFiles apply includes and ! exclusions", () => {
-  const [rule] = compileRules(PATHS, [{ path: ".", name: "x", manifestFile: "package.json" }]);
+  const [rule] = compileRules(PATHS, [{ path: ".", name: "x" }]);
   assert.deepEqual(shippedFiles(["src/a.mjs", "src/a.test.mjs", "test/b.mjs", "package.json"], rule), ["src/a.mjs", "package.json"]);
 });
 
 test("paths belong to the only package, to the package they lie in, or to the package they are keyed by", () => {
-  const sidKit = { path: "packages/sid-kit", name: "@maxvyshniakov/sid-kit", manifestFile: "package.json" };
-  const grid = { path: "packages/data-grid", name: "@maxvyshniakov/data-grid", manifestFile: "package.json" };
+  const sidKit = { path: "packages/sid-kit", name: "@maxvyshniakov/sid-kit" };
+  const grid = { path: "packages/data-grid", name: "@maxvyshniakov/data-grid" };
   const rules = compileRules(["packages/sid-kit/src/**", "packages/data-grid/src/**", "!packages/data-grid/src/**/*.test.ts"], [grid, sidKit]);
   assert.deepEqual(rules.map(rule => [rule.pkg.name, rule.changelog, rule.manifest]), [
     ["@maxvyshniakov/sid-kit", "packages/sid-kit/CHANGELOG.md", "packages/sid-kit/package.json"],
@@ -126,7 +126,7 @@ test("a shipped change without an entry fails; with an entry or the trailer it p
     assert.equal(repo.check().result, 0);
 
     // The whole range: "Add a" and "Add d" fail.
-    const range = rangeIssues(repo.root, ["HEAD~5..HEAD"], compileRules(PATHS, [{ path: ".", name: "@maxvyshniakov/example", manifestFile: "package.json" }]));
+    const range = rangeIssues(repo.root, ["HEAD~5..HEAD"], compileRules(PATHS, [{ path: ".", name: "@maxvyshniakov/example" }]));
     assert.deepEqual(range.failures.map(failure => failure.subject), ["Add a", "Add d"]);
     assert.equal(range.checked, 5);
   } finally {
@@ -159,29 +159,18 @@ test("merge commits and release commits are exempt; a bare version bump is not",
   }
 });
 
-test("the guard applies to a workspace package's and a Python package's CHANGELOG.md", () => {
+test("the guard applies to a workspace package's CHANGELOG.md", () => {
   const workspace = guarded(workspaceFiles({
     "repo-kit.config.mjs": configText(["packages/example/src/**"]),
     "packages/example/src/index.mjs": "export {};\n",
   }), ["packages/example/src/**"]);
-  const python = guarded(pyprojectFiles({ "repo-kit.config.mjs": configText(["example/**", "pyproject.toml"]), "example/__init__.py": "" }), ["example/**", "pyproject.toml"]);
   try {
     workspace.commit({ "packages/example/src/index.mjs": "export const a = 1;\n", "CHANGELOG.md": "# Not the package's\n" }, "Wrong changelog");
     assert.match(workspace.check().output, /without a line under "## Unreleased" in packages\/example\/CHANGELOG.md/);
     workspace.commit({ "packages/example/src/index.mjs": "export const b = 1;\n", "packages/example/CHANGELOG.md": entry }, "Right changelog");
     assert.equal(workspace.check().result, 0);
-
-    python.commit({ "example/__init__.py": "VALUE = 1\n" }, "Value");
-    assert.match(python.check().output, /example\/__init__.py changed example without a line/);
-    // A release cut that moves pyproject.toml's version is exempt.
-    python.commit({
-      "CHANGELOG.md": text => fs.readFileSync(text, "utf8").replace("## Unreleased\n", "## Unreleased\n\n## 0.3.0 - 2026-11-11\n"),
-      "pyproject.toml": text => fs.readFileSync(text, "utf8").replace('version = "0.2.0"', 'version = "0.3.0"'),
-    }, "Release 0.3.0");
-    assert.equal(python.check().result, 0, python.check().output);
   } finally {
     workspace.cleanup();
-    python.cleanup();
   }
 });
 
@@ -207,17 +196,17 @@ test("hooks sync writes commit-msg with changelog.paths, hooks.managed narrows t
   assert.deepEqual(Object.keys(managedHooks({ commitMsg: true, only: ["commit-msg"] })), ["commit-msg"]);
   assert.throws(() => managedHooks({ only: ["pre-commit"] }), /hooks.managed: expected a list of/);
 
-  const python = tempRepository(pyprojectFiles());
+  const repository = tempRepository(rootPackageFiles());
   try {
-    const config = withDefaults({ changelog: { paths: ["example/**"] }, hooks: { managed: ["commit-msg"] } });
-    assert.match(hookIssues(python.root, config).join("\n"), /\.githooks\/commit-msg is missing/);
-    quiet(() => syncHooks(python.root, config));
-    assert.deepEqual(fs.readdirSync(path.join(python.root, ".githooks")), ["commit-msg"]);
-    assert.deepEqual(hookIssues(python.root, config), []);
-    fs.writeFileSync(path.join(python.root, ".githooks/commit-msg"), "#!/bin/sh\nexit 0\n");
-    assert.throws(() => syncHooks(python.root, config), /commit-msg is the repository's own/);
+    const config = withDefaults({ changelog: { paths: ["src/**"] }, hooks: { managed: ["commit-msg"] } });
+    assert.match(hookIssues(repository.root, config).join("\n"), /\.githooks\/commit-msg is missing/);
+    quiet(() => syncHooks(repository.root, config));
+    assert.deepEqual(fs.readdirSync(path.join(repository.root, ".githooks")), ["commit-msg"]);
+    assert.deepEqual(hookIssues(repository.root, config), []);
+    fs.writeFileSync(path.join(repository.root, ".githooks/commit-msg"), "#!/bin/sh\nexit 0\n");
+    assert.throws(() => syncHooks(repository.root, config), /commit-msg is the repository's own/);
   } finally {
-    python.cleanup();
+    repository.cleanup();
   }
 });
 
@@ -270,30 +259,30 @@ test("the commit-msg hook checks the commit being made, including -a, amends and
 });
 
 test("in a repository without node_modules the commit-msg hook runs the repo-kit on PATH", () => {
-  const python = guarded(pyprojectFiles({
-    "repo-kit.config.mjs": configText(["example/**"], ', hooks: { managed: ["commit-msg"] }'),
-    "example/__init__.py": "",
-  }), ["example/**"]);
+  const repository = guarded(rootPackageFiles({
+    "repo-kit.config.mjs": configText(["src/**"], ', hooks: { managed: ["commit-msg"] }'),
+    "src/index.mjs": "export {};\n",
+  }), ["src/**"]);
   try {
-    quiet(() => syncHooks(python.root, { ...python.config, hooks: { managed: ["commit-msg"] } }));
-    python.git("config", "core.hooksPath", ".githooks");
-    const bin = path.join(python.root, ".bin");
+    quiet(() => syncHooks(repository.root, { ...repository.config, hooks: { managed: ["commit-msg"] } }));
+    repository.git("config", "core.hooksPath", ".githooks");
+    const bin = path.join(repository.root, ".bin");
     fs.mkdirSync(bin);
     fs.symlinkSync(path.join(kitRoot, "src/cli.mjs"), path.join(bin, "repo-kit"));
-    fs.writeFileSync(path.join(python.root, ".gitignore"), ".bin/\n");
-    fs.writeFileSync(path.join(python.root, "example/__init__.py"), "VALUE = 1\n");
-    python.git("add", "-A");
-    const commit = env => spawnSync("git", ["commit", "--quiet", "-m", "Value"], { cwd: python.root, env, encoding: "utf8" });
+    fs.writeFileSync(path.join(repository.root, ".gitignore"), ".bin/\n");
+    fs.writeFileSync(path.join(repository.root, "src/index.mjs"), "export const a = 1;\n");
+    repository.git("add", "-A");
+    const commit = env => spawnSync("git", ["commit", "--quiet", "-m", "Value"], { cwd: repository.root, env, encoding: "utf8" });
     // Without a kit to run, the hook warns and lets the commit through; CI's range check still runs.
-    const missing = commit({ ...python.env, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` });
+    const missing = commit({ ...repository.env, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` });
     assert.equal(missing.status, 0, missing.stderr);
     assert.match(missing.stderr, /commit-msg: warning: repo-kit is not installed; run bun install, or put repo-kit on PATH\. The changelog-entry check did not run/);
-    python.git("reset", "--quiet", "--soft", "HEAD~1");
-    const refused = commit({ ...python.env, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` });
+    repository.git("reset", "--quiet", "--soft", "HEAD~1");
+    const refused = commit({ ...repository.env, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` });
     assert.equal(refused.status, 1, refused.stderr);
-    assert.match(refused.stderr, /example\/__init__.py changed example without a line under "## Unreleased" in CHANGELOG.md/);
+    assert.match(refused.stderr, /src\/index.mjs changed @maxvyshniakov\/example without a line under "## Unreleased" in CHANGELOG.md/);
   } finally {
-    python.cleanup();
+    repository.cleanup();
   }
 });
 

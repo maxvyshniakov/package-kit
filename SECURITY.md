@@ -14,7 +14,6 @@ Only the latest release is supported.
 - The pre-push, release-gate and publish commands: anything that lets a pushed commit, a package archive or a
   registry response run code or publish something the maintainer did not intend.
 - The reusable workflows and the `setup-bun` action: token permissions, secret handling, and inputs reaching a shell.
-- The TLS gate: a Bun runtime or network path that passes it while trusting a certificate it should reject.
 
 ## What is not
 

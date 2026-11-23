@@ -1,7 +1,6 @@
 // Cuts package releases: moves each package's "## Unreleased" entries under a
-// new "## x.y.z - YYYY-MM-DD" heading and sets that version in package.json
-// (or pyproject.toml's [project] version, changelog.versionSource), in bun.lock's
-// workspace entry and in the quick start's archive names. Publish the pushed
+// new "## x.y.z - YYYY-MM-DD" heading and sets that version in package.json,
+// in bun.lock's workspace entry and in the quick start's archive names. Publish the pushed
 // release with `repo-kit publish`.
 //
 //   repo-kit release sid-kit:minor                 a package under packages/
@@ -12,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { formatChangelog, nextVersion, parseChangelog } from "./changelog.mjs";
-import { releasedPackages } from "./packages.mjs";
+import { MANIFEST_FILE, releasedPackages } from "./packages.mjs";
 
 export function cutRelease(changelog, { version, date }) {
   const parsed = parseChangelog(changelog);
@@ -55,8 +54,8 @@ export async function runRelease(config, args) {
   }
   const { root } = config;
   // Validate every package before writing any of them.
-  const planned = releaseRequests(requests, releasedPackages(root, { versionSource: config.changelog.versionSource })).map(({ pkg, level }) => {
-    const manifestPath = path.join(pkg.dir, pkg.manifestFile);
+  const planned = releaseRequests(requests, releasedPackages(root)).map(({ pkg, level }) => {
+    const manifestPath = path.join(pkg.dir, MANIFEST_FILE);
     const manifestText = fs.readFileSync(manifestPath, "utf8");
     const version = nextVersion(pkg.version, level);
     const changelogPath = path.join(pkg.dir, "CHANGELOG.md");

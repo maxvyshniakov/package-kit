@@ -7,8 +7,7 @@ import { changelogPackages, runCheckChangelogs } from "../src/check-changelogs.m
 import { withDefaults } from "../src/config.mjs";
 import { lockfileWorkspaceVersion, releasedPackages } from "../src/packages.mjs";
 import { runRelease } from "../src/release.mjs";
-import { pyprojectProject } from "../src/version-source.mjs";
-import { kitRoot, pyprojectFiles, rootPackageFiles, tempRepository, workspaceFiles } from "./fixtures.mjs";
+import { kitRoot, rootPackageFiles, tempRepository, workspaceFiles } from "./fixtures.mjs";
 
 const capture = fn => {
   const { log, error } = console;
@@ -34,53 +33,39 @@ const capture = fn => {
   return { result, stdout: out.join("\n"), stderr: err.join("\n") };
 };
 
-test("releasedPackages hides npm workspace, root npm and pyproject differences behind one interface", () => {
+test("releasedPackages hides npm workspace and root package differences behind one interface", () => {
   const ws = tempRepository(workspaceFiles());
   const rootNpm = tempRepository(rootPackageFiles());
-  const py = tempRepository(pyprojectFiles());
+  const none = tempRepository({ "repo-kit.config.mjs": "export default {};\n" });
   try {
     const [wsPkg] = releasedPackages(ws.root);
-    assert.equal(wsPkg.manifestFile, "package.json");
     assert.equal(wsPkg.workspace, true);
-    assert.equal(wsPkg.publishable, true);
     assert.equal(wsPkg.archiveName("0.2.0"), "maxvyshniakov-example-0.2.0.tgz");
     assert.equal(wsPkg.archiveName("0.3.0"), "maxvyshniakov-example-0.3.0.tgz");
     assert.deepEqual(wsPkg.archiveVersionsIn("bun add ./maxvyshniakov-example-0.2.0.tgz"), ["0.2.0"]);
     const lock = fs.readFileSync(path.join(ws.root, "bun.lock"), "utf8");
     assert.equal(wsPkg.lockfileVersion(lock), "0.2.0");
     assert.equal(lockfileWorkspaceVersion(wsPkg.withLockfileVersion(lock, "0.3.0"), "packages/example"), "0.3.0");
-    const wsManifest = fs.readFileSync(path.join(wsPkg.dir, wsPkg.manifestFile), "utf8");
+    const wsManifest = fs.readFileSync(path.join(wsPkg.dir, "package.json"), "utf8");
     assert.equal(wsPkg.readVersion(wsManifest), "0.2.0");
     assert.equal(wsPkg.readVersion(wsPkg.withVersion(wsManifest, "0.2.0", "0.3.0")), "0.3.0");
 
     const [rootPkg] = releasedPackages(rootNpm.root);
     assert.equal(rootPkg.workspace, false);
-    assert.equal(rootPkg.publishable, true);
     assert.equal(rootPkg.archiveName("0.2.0"), "maxvyshniakov-example-0.2.0.tgz");
     assert.equal(rootPkg.lockfileVersion(lock), undefined);
     assert.equal(rootPkg.withLockfileVersion(lock, "0.3.0"), lock);
 
-    const [pyPkg] = releasedPackages(py.root);
-    assert.equal(pyPkg.manifestFile, "pyproject.toml");
-    assert.equal(pyPkg.workspace, false);
-    assert.equal(pyPkg.publishable, false);
-    assert.equal(pyPkg.archiveName("0.2.0"), undefined);
-    assert.deepEqual(pyPkg.archiveVersionsIn("bun add ./example-0.2.0.tgz"), []);
-    assert.equal(pyPkg.lockfileVersion(lock), undefined);
-    assert.equal(pyPkg.withLockfileVersion(lock, "0.3.0"), lock);
-    const pyManifest = fs.readFileSync(path.join(pyPkg.dir, pyPkg.manifestFile), "utf8");
-    assert.equal(pyPkg.readVersion(pyManifest), "0.2.0");
-    assert.equal(pyPkg.readVersion(pyPkg.withVersion(pyManifest, "0.2.0", "0.3.0")), "0.3.0");
+    assert.throws(() => releasedPackages(none.root), /^Error: package\.json not found$/);
   } finally {
     ws.cleanup();
     rootNpm.cleanup();
-    py.cleanup();
+    none.cleanup();
   }
 });
 
-test("pkg.versionCommit finds the release commit for both package.json and pyproject.toml", () => {
+test("pkg.versionCommit finds the release commit, even when later commits touched package.json", () => {
   const npmRepo = tempRepository(rootPackageFiles(), { git: true });
-  const pyRepo = tempRepository(pyprojectFiles(), { git: true });
   try {
     const [npmPkg0] = releasedPackages(npmRepo.root);
     const npmManifest = path.join(npmRepo.root, "package.json");
@@ -93,22 +78,12 @@ test("pkg.versionCommit finds the release commit for both package.json and pypro
     const [npmPkg] = releasedPackages(npmRepo.root);
     assert.equal(npmPkg.versionCommit((...args) => npmRepo.git(...args)), npmRelease);
 
-    const [pyPkg0] = releasedPackages(pyRepo.root);
-    const pyManifest = path.join(pyRepo.root, "pyproject.toml");
-    fs.writeFileSync(pyManifest, pyPkg0.withVersion(fs.readFileSync(pyManifest, "utf8"), "0.2.0", "0.3.0"));
-    pyRepo.git("commit", "--quiet", "-am", "release 0.3.0");
-    const pyRelease = pyRepo.git("rev-parse", "HEAD");
-    fs.appendFileSync(pyManifest, "\n# trailing comment\n");
-    pyRepo.git("commit", "--quiet", "-am", "touch pyproject.toml");
-    const [pyPkg] = releasedPackages(pyRepo.root);
-    assert.equal(pyPkg.versionCommit((...args) => pyRepo.git(...args)), pyRelease);
   } finally {
     npmRepo.cleanup();
-    pyRepo.cleanup();
   }
 });
 
-test("release and check-changelogs produce expected files and output for workspace, root npm and pyproject fixtures", async () => {
+test("release and check-changelogs produce expected files and output for workspace and root npm fixtures", async () => {
   const cases = [
     {
       label: "workspace",
@@ -126,15 +101,6 @@ test("release and check-changelogs produce expected files and output for workspa
       name: "@maxvyshniakov/example",
       changelogPath: "CHANGELOG.md",
       readManifestVersion: root => JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version,
-      stopBeforeInstall: false,
-    },
-    {
-      label: "pyproject",
-      files: pyprojectFiles({ "docs/GETTING_STARTED.md": "pip install example==0.2.0\n" }),
-      request: "minor",
-      name: "example",
-      changelogPath: "CHANGELOG.md",
-      readManifestVersion: root => pyprojectProject(fs.readFileSync(path.join(root, "pyproject.toml"), "utf8")).version,
       stopBeforeInstall: false,
     },
   ];
@@ -168,11 +134,7 @@ test("release and check-changelogs produce expected files and output for workspa
       if (fixture.label === "workspace") {
         assert.equal(lockfileWorkspaceVersion(fs.readFileSync(path.join(repo.root, "bun.lock"), "utf8"), "packages/example"), "0.3.0");
       }
-      if (fixture.label !== "pyproject") {
-        assert.match(fs.readFileSync(path.join(repo.root, "docs/GETTING_STARTED.md"), "utf8"), /maxvyshniakov-example-0\.3\.0\.tgz/);
-      } else {
-        assert.equal(fs.readFileSync(path.join(repo.root, "docs/GETTING_STARTED.md"), "utf8"), "pip install example==0.2.0\n");
-      }
+      assert.match(fs.readFileSync(path.join(repo.root, "docs/GETTING_STARTED.md"), "utf8"), /maxvyshniakov-example-0\.3\.0\.tgz/);
 
       const post = capture(() => runCheckChangelogs(config, { release: true }));
       assert.equal(post.result, true, fixture.label);
