@@ -66,6 +66,7 @@ export function parseChangelog(text) {
   let unreleased = null;
   const releases = [];
   for (const [position, section] of sections.entries()) {
+    errors.push(...duplicateSubsections(section));
     if (section.heading === "## Unreleased") {
       if (position !== 0) errors.push(`line ${section.line}: "## Unreleased" must be the first section`);
       if (unreleased !== null) errors.push(`line ${section.line}: duplicate "## Unreleased"`);
@@ -91,6 +92,21 @@ export function parseChangelog(text) {
   }
 
   return { title, intro: trimBlank(intro).join("\n"), unreleased: unreleased ?? "", releases, errors };
+}
+
+// A union merge of two branches that both added "### Added" under one release leaves the heading twice.
+function duplicateSubsections(section) {
+  const errors = [];
+  const seen = new Map();
+  for (const [offset, line] of section.body.entries()) {
+    const heading = /^### (.+)$/.exec(line);
+    if (!heading) continue;
+    const lineNumber = section.line + 1 + offset;
+    const first = seen.get(heading[1]);
+    if (first === undefined) seen.set(heading[1], lineNumber);
+    else errors.push(`line ${lineNumber}: duplicate "### ${heading[1]}" in "${section.heading}" (first at line ${first}); merge their entries into one section`);
+  }
+  return errors;
 }
 
 // Each "- " entry under the section's "### Breaking" needs a non-empty "No transition period:" line of its own.
