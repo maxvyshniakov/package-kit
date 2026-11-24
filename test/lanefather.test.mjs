@@ -288,3 +288,91 @@ test('the adapter leases the slots Lanefather gives it with --jobs, no more than
   assert.equal(laneLeaseSlots(config, heavy, 1, { gibPerSlot: 5 }), 2);
   assert.equal(laneLeaseSlots(config, heavy, 1), 1, 'a machine without slot memory: the jobs');
 });
+
+function stubLanefather(dir, script) {
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const file = path.join(binDir, 'lanefather');
+  fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return binDir;
+}
+
+test('a passing full run stamps the verified tree via lanefather stamp record', () => {
+  const repo = tempRepository({
+    'package.json': { name: 'stamp-fixture', type: 'module' },
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'ok',command:['-e','process.exit(0)']}]}};`,
+  }, { git: true });
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lf-stub-'));
+  try {
+    const head = repo.git('rev-parse', 'HEAD');
+    const tree = repo.git('rev-parse', 'HEAD^{tree}');
+    const calls = path.join(tools, 'calls.log');
+    const binDir = stubLanefather(tools, `printf '%s\\n' "$*" >> ${JSON.stringify(calls)}\necho "Verified tree ${tree} stamped."`);
+    const env = { ...repo.env, PATH: `${binDir}:${repo.env.PATH}` };
+    const result = spawnSync(process.execPath, [adapter, '--jobs', '1'],
+      { cwd: repo.root, env, encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, new RegExp(`^Verified tree ${tree} stamped\\.$`, 'm'));
+    assert.equal(fs.readFileSync(calls, 'utf8').trim(), `stamp record ${head}`);
+  } finally {
+    repo.cleanup();
+    fs.rmSync(tools, { recursive: true, force: true });
+  }
+});
+
+test('partial, failed and inputs-changed runs do not stamp the verified tree', () => {
+  const repo = tempRepository({
+    'package.json': { name: 'no-stamp-fixture', type: 'module' },
+    'input.txt': 'before',
+    'package-kit.config.mjs': `export default {verify:{steps:[
+      {name:'ok',command:['-e','process.exit(0)']},
+      {name:'fail',command:['-e','process.exit(1)']},
+    ]}};`,
+  }, { git: true });
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lf-nostamp-'));
+  try {
+    const calls = path.join(tools, 'calls.log');
+    const binDir = stubLanefather(tools, `printf '%s\\n' "$*" >> ${JSON.stringify(calls)}\necho "Verified tree deadbeef stamped."`);
+    const env = { ...repo.env, PATH: `${binDir}:${repo.env.PATH}` };
+    // Partial (--checks) passes but must not stamp.
+    const partialChecks = spawnSync(process.execPath, [adapter, '--checks', 'verify:ok', '--jobs', '1'],
+      { cwd: repo.root, env, encoding: 'utf8', timeout: 15000 });
+    assert.equal(partialChecks.status, 0, partialChecks.stdout + partialChecks.stderr);
+    assert.doesNotMatch(partialChecks.stdout, /^Verified tree /m);
+    // Partial (--suites) fails here too, and even if passing must not stamp; test failed full run as well.
+    const failedFull = spawnSync(process.execPath, [adapter, '--jobs', '1'],
+      { cwd: repo.root, env, encoding: 'utf8', timeout: 15000 });
+    assert.equal(failedFull.status, 1, failedFull.stdout + failedFull.stderr);
+    assert.doesNotMatch(failedFull.stdout, /^Verified tree /m);
+    assert.equal(fs.existsSync(calls), false, 'lanefather stamp must not be invoked for partial or failed runs');
+  } finally {
+    repo.cleanup();
+    fs.rmSync(tools, { recursive: true, force: true });
+  }
+});
+
+test('stamping degrades silently when lanefather is older or unavailable', async () => {
+  const { stampVerifiedTree } = await import('../src/lanefather.mjs');
+  const repo = tempRepository({
+    'package.json': { name: 'compat-fixture', type: 'module' },
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'ok',command:['-e','process.exit(0)']}]}};`,
+  }, { git: true });
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lf-compat-'));
+  try {
+    // Older lanefather without `stamp` subcommand exits 2 with stderr usage message.
+    const oldBinDir = stubLanefather(tools, `echo "lanefather: error: argument command: invalid choice: 'stamp'" >&2\nexit 2`);
+    const oldEnv = { ...repo.env, PATH: `${oldBinDir}:${repo.env.PATH}` };
+    const result = spawnSync(process.execPath, [adapter, '--jobs', '1'],
+      { cwd: repo.root, env: oldEnv, encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /^Verification report: /m);
+    assert.doesNotMatch(result.stdout, /^Verified tree /m);
+    assert.equal(result.stderr, '');
+    // Absent binary degrades cleanly without throwing.
+    const missing = stampVerifiedTree(repo.root, 'HEAD', { env: repo.env, bin: path.join(tools, 'no-such-lanefather') });
+    assert.deepEqual(missing, { stamped: false, line: '' });
+  } finally {
+    repo.cleanup();
+    fs.rmSync(tools, { recursive: true, force: true });
+  }
+});

@@ -506,9 +506,11 @@ retains its fail-fast behavior. Reports and step logs live under the checkout's 
 
 A run prints `Verification report: <path>` to a version-1 JSON report with the original commit/tree, each check's
 status, log and blocking dependencies. Cancellation, failed setup or changed committed inputs cannot yield green
-verification evidence. Lanefather remains responsible for receipts, review, landing and cleanup. The adapter
-creates neither a verified-tree stamp nor a pre-push/release attestation. Those existing gates keep their own
-contracts and still run when publishing.
+verification evidence. Lanefather remains responsible for receipts, review, landing and cleanup. When a full
+run passes on a clean checkout and `lanefather` is on `PATH` with built-in stamping, the adapter records the
+verified tree via `lanefather stamp record` and prints its `Verified tree <tree> stamped.` line; older or absent
+`lanefather` installations degrade cleanly without failing the run. Pre-push and release attestations keep their
+own contracts and still run when publishing.
 
 Adding this adapter does not reconcile a previously published lane that never went through `land`. Keep that
 historical completion separate; changing a published task's metadata does not manufacture its missing evidence.

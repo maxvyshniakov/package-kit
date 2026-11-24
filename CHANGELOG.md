@@ -7,6 +7,8 @@ Versions and release rules: [README.md](README.md#versioning).
 ### Changed
 
 - Print the package's own `npmjs.com/package/<name>/access` trusted-publishing checklist when `npm publish` fails with `ENEEDAUTH`, and document per-package trusted-publisher setup in `docs/reference.md`.
+- Sync the pinned `hooks/reference-transaction` copy (and `REFERENCE_TRANSACTION_SHA256`) with Lanefather (`2b54f8a`): allow `git pack-refs` / `git gc --auto` no-op updates, block `0->0` branch deletions, allow `ORIG_HEAD` deletion, and guard case-insensitive `main`/`dev` on macOS.
+- `package-kit-lane` stamps the verified tree via `lanefather stamp record` after a passing full run on a clean checkout, emitting `Verified tree <tree> stamped.` for Lanefather while staying backwards compatible when `lanefather` is older or unavailable.
 
 ## 1.0.1 - 2026-11-23
 

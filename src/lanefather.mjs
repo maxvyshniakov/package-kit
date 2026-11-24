@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Lanefather's verification command contract over the consumer's Package-Kit steps.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,24 @@ export function laneLeaseSlots(config, selected, jobs = Infinity, { gibPerSlot =
   const largest = Math.max(0, ...selected.map(check => check.step?.memory ?? 0));
   const floor = gibPerSlot > 0 ? Math.ceil(largest / gibPerSlot) : 0;
   return Math.min(configured, Math.max(jobs, floor));
+}
+
+/**
+ * Record the verified tree in Lanefather's stamp ledger (`lanefather stamp record`)
+ * after a passing full run on a clean checkout. Returns the standard stamp line
+ * Lanefather parses (`Verified tree <tree> stamped.`), or degrades silently when
+ * `lanefather` is absent or predates built-in stamping.
+ */
+export function stampVerifiedTree(root, rev, { env = cleanEnvironment(), bin = 'lanefather' } = {}) {
+  const result = spawnSync(bin, ['stamp', 'record', rev], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) return { stamped: false, line: '' };
+  const line = (result.stdout || '').trim();
+  return { stamped: Boolean(line), line };
 }
 
 export async function main(args) {
@@ -148,6 +167,11 @@ export async function main(args) {
   const file = path.join(run, 'report.json');
   fs.writeFileSync(file, JSON.stringify(report, null, 2) + '\n');
   console.log(`Verification report: ${file}`);
+  const full = values.checks === undefined && values.suites === undefined;
+  if (full && report.exit === 0) {
+    const stamped = stampVerifiedTree(config.root, head, { env: gitEnv });
+    if (stamped.line) console.log(stamped.line);
+  }
   return report.exit;
 }
 

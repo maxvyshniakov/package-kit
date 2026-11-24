@@ -20,7 +20,7 @@ import { BUN_VERSION } from "./toolchain.mjs";
 
 const kitRoot = fileURLToPath(new URL("..", import.meta.url));
 
-export const REFERENCE_TRANSACTION_SHA256 = "8fbd90c9562f94c4f45eb841351bc657b217160e511508367b0c8fbed29203f9";
+export const REFERENCE_TRANSACTION_SHA256 = "1e83fad86f31f94fb5c1c08d226900c5f3671ec236a2cd6db177b6c5748edea7";
 
 export function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
