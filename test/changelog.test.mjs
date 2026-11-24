@@ -171,6 +171,27 @@ test("release order, dates, headings and sections are checked", () => {
   assert.match(parseChangelog(late).errors.join("\n"), /must be the first section/);
 });
 
+test("a release section with the same ### heading twice fails, naming the section and both lines", () => {
+  const unreleased = changelog.replace("- Fixed a thing.\n", "- Fixed a thing.\n\n### Fixed\n\n- Fixed another thing.\n");
+  assert.deepEqual(parseChangelog(unreleased).errors, [
+    'line 11: duplicate "### Fixed" in "## Unreleased" (first at line 7); merge their entries into one section',
+  ]);
+  const versioned = changelog.replace("- Breaking: removed a prop.\n", "- Breaking: removed a prop.\n\n### Added\n\n- A.\n\n### Added\n\n- B.\n");
+  assert.deepEqual(parseChangelog(versioned).errors, [
+    'line 21: duplicate "### Added" in "## 0.2.0 - 2026-09-20" (first at line 17); merge their entries into one section',
+  ]);
+  const issues = changelogIssues({ name: "@maxvyshniakov/example", version: "0.2.0", changelog: versioned });
+  assert.match(issues.join("\n"), /duplicate "### Added" in "## 0.2.0 - 2026-09-20"/);
+});
+
+test("the same ### heading in different release sections passes", () => {
+  const separate = changelog
+    .replace("### Fixed\n", "### Added\n\n- New.\n\n### Fixed\n")
+    .replace("### Breaking\n", "### Added\n\n- Older.\n\n### Breaking\n")
+    .replace("- First release.\n", "### Added\n\n- First release.\n");
+  assert.deepEqual(parseChangelog(separate).errors, []);
+});
+
 test("bun.lock workspace versions are read and replaced in place", () => {
   assert.equal(lockfileWorkspaceVersion(lockfile, "packages/example"), "0.2.0");
   const updated = setLockfileWorkspaceVersion(lockfile, "packages/example", "0.3.0");

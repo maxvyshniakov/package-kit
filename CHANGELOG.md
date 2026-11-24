@@ -4,6 +4,10 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+### Fixed
+
+- `check-changelogs` fails a release section (`## Unreleased` or `## x.y.z`) that holds the same `### <Heading>` twice, as a `merge=union` merge of two branches that each added `### Added` leaves it, naming the section, the heading and both lines.
+
 ### Changed
 
 - Print the package's own `npmjs.com/package/<name>/access` trusted-publishing checklist when `npm publish` fails with `ENEEDAUTH`, and document per-package trusted-publisher setup in `docs/reference.md`.
