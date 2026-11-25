@@ -9,14 +9,18 @@ import test from "node:test";
 import { withDefaults } from "../src/config.mjs";
 import { dispatchUrl, notify, notifyAll } from "../src/notify.mjs";
 import {
+  archiveCommit,
   checksState,
   githubRepository,
+  hasBreakingEntry,
   noreplyEmail,
   NPM_FLOOR,
   NPM_RELEASE_WORKFLOW,
   npmBlockers,
   npmPublishArguments,
   npmTrustedPublishingHint,
+  parsePublishArgs,
+  prereleaseVersion,
   provenanceWanted,
   publishArguments,
   publishBlockers,
@@ -25,13 +29,14 @@ import {
   releaseArchive,
   releaseCommitOf,
   resumePublication,
+  runPrerelease,
   runPublish,
   tagEnvironment,
   tagPushRecovery,
 } from "../src/publish.mjs";
 import { packageUrl, publicationIssues, registriesOf, registryClient, tarballIntegrity, verifyPublication } from "../src/registry.mjs";
 
-import { tempRepository } from "./fixtures.mjs";
+import { rootPackageFiles, tempRepository, workspaceFiles } from "./fixtures.mjs";
 
 const ready = { token: "t", dirty: false, head: "a".repeat(40), upstream: "a".repeat(40), issues: [], tagExists: false, tag: "v0.2.0" };
 
@@ -443,4 +448,654 @@ test("npmTrustedPublishingHint names the package's own npmjs.org access page on 
   assert.match(hint.join("\n"), /https:\/\/www\.npmjs\.com\/package\/@maxvyshniakov\/text-truncate\/access/);
   assert.match(hint.join("\n"), /release-npm\.yml/);
   assert.match(hint.join("\n"), /Allow npm publish/);
+});
+
+// Prerelease publishing (--prerelease <preid> --dist-tag <tag> [--ref <sha>] [--dry-run]).
+
+test("parsePublishArgs validates release and prerelease flags, refusing latest, unpaired or invalid identifiers", () => {
+  assert.deepEqual(parsePublishArgs([]), { mode: "release", resume: false });
+  assert.deepEqual(parsePublishArgs(["--resume"]), { mode: "release", resume: true });
+  assert.deepEqual(parsePublishArgs(["--prerelease", "integration", "--dist-tag", "integration"]), {
+    mode: "prerelease", preid: "integration", distTag: "integration", ref: undefined, dryRun: false,
+  });
+  assert.deepEqual(parsePublishArgs(["--prerelease=beta-1", "--dist-tag=next", "--ref=HEAD~1", "--dry-run"]), {
+    mode: "prerelease", preid: "beta-1", distTag: "next", ref: "HEAD~1", dryRun: true,
+  });
+
+  assert.throws(() => parsePublishArgs(["--prerelease", "integration", "--dist-tag", "latest"]), /--dist-tag cannot be "latest"/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "integration"]), /must be given together/);
+  assert.throws(() => parsePublishArgs(["--dist-tag", "integration"]), /must be given together/);
+  assert.throws(() => parsePublishArgs(["--dry-run"]), /must be given together/);
+  assert.throws(() => parsePublishArgs(["--ref", "HEAD"]), /must be given together/);
+  assert.throws(() => parsePublishArgs(["--resume", "--prerelease", "integration", "--dist-tag", "integration"]), /--resume cannot be combined/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "Integration", "--dist-tag", "integration"]), /Invalid --prerelease/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "1beta", "--dist-tag", "integration"]), /Invalid --prerelease/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "beta-", "--dist-tag", "integration"]), /Invalid --prerelease/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "integration", "--dist-tag", "bad/tag"]), /Invalid --dist-tag/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "integration", "--dist-tag", "integration", "--ref", "--all"]), /Invalid --ref/);
+  assert.throws(() => parsePublishArgs(["--prerelease", "a", "--prerelease", "b", "--dist-tag", "next"]), /Duplicate --prerelease/);
+  assert.throws(() => parsePublishArgs(["--unknown"]), /Unknown publish option/);
+});
+
+test("prereleaseVersion computes X.Y.Z-<preid>.N from existing registry versions and changelog breaking entries", () => {
+  assert.deepEqual(
+    prereleaseVersion({ current: "0.42.0", published: ["0.42.0"], unreleased: "", preid: "integration" }),
+    { base: "0.43.0", level: "minor", version: "0.43.0-integration.1" },
+  );
+  assert.deepEqual(
+    prereleaseVersion({
+      current: "0.42.0",
+      published: ["0.42.0", "0.43.0-integration.1", "0.43.0-integration.4", "0.43.0-beta.9", "0.42.0-integration.99"],
+      unreleased: "",
+      preid: "integration",
+    }),
+    { base: "0.43.0", level: "minor", version: "0.43.0-integration.5" },
+  );
+  // Newer stable version on registry wins over older local package.json.
+  assert.deepEqual(
+    prereleaseVersion({ current: "0.42.0", published: ["0.42.0", "0.43.0"], unreleased: "", preid: "integration" }),
+    { base: "0.44.0", level: "minor", version: "0.44.0-integration.1" },
+  );
+  // Before 1.0.0 a breaking entry is still a minor; from 1.0.0 on it is a major.
+  const breaking = "### Breaking\n\n- Removed old prop.\n  No transition period: replaced.\n";
+  assert.equal(hasBreakingEntry(breaking), true);
+  assert.deepEqual(
+    prereleaseVersion({ current: "0.9.0", published: ["0.9.0"], unreleased: breaking, preid: "integration" }),
+    { base: "0.10.0", level: "minor", version: "0.10.0-integration.1" },
+  );
+  assert.deepEqual(
+    prereleaseVersion({ current: "1.2.0", published: ["1.2.0", "2.0.0-integration.2"], unreleased: breaking, preid: "integration" }),
+    { base: "2.0.0", level: "major", version: "2.0.0-integration.3" },
+  );
+});
+
+test("publishArguments and npmPublishArguments forward --tag and --dry-run", () => {
+  assert.deepEqual(publishArguments("/repo/bunfig.toml", "/tmp/a.tgz", { tag: "integration", dryRun: true }), [
+    "publish", "/tmp/a.tgz", "--config=/repo/bunfig.toml", "--tag=integration", "--dry-run",
+  ]);
+  assert.deepEqual(npmPublishArguments({ tarball: "/tmp/a.tgz", name: "@maxvyshniakov/example", tag: "next", dryRun: true }), [
+    "publish", "/tmp/a.tgz", `--userconfig=${devNull}`, "--registry=https://registry.npmjs.org/", "--@maxvyshniakov:registry=https://registry.npmjs.org/", "--access=public", "--tag=next", "--dry-run",
+  ]);
+});
+
+test("archiveCommit requires a full 40-hex commit SHA", () => {
+  assert.throws(() => archiveCommit({ root: ".", commit: "HEAD", into: tmpdir() }), /full commit SHA/);
+  assert.throws(() => archiveCommit({ root: ".", commit: "abc1234", into: tmpdir() }), /full commit SHA/);
+});
+
+test("runPrerelease publishes from exact captured SHA without mutating working tree, creating tags, notifying or running release gate", async () => {
+  const repository = tempRepository(rootPackageFiles({ "index.js": "export const value = 1;\n" }), { git: true });
+  try {
+    const head = repository.git("rev-parse", "HEAD");
+    const manifestBefore = readFileSync(path.join(repository.root, "package.json"), "utf8");
+    const config = withDefaults({ publish: { notify: [dataGrid] } });
+    config.root = repository.root;
+
+    const commands = [];
+    const requests = [];
+    let packedManifest;
+    let packedIntegrity;
+    let call = 0;
+    const fetcher = async (url, options) => {
+      requests.push({ url, method: options?.method ?? "GET" });
+      if (call++ === 0) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ versions: { "0.2.0": {}, "0.3.0-integration.2": {} }, "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.2" } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          versions: { "0.2.0": {}, "0.3.0-integration.2": {}, "0.3.0-integration.3": { gitHead: head, dist: { integrity: packedIntegrity } } },
+          "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.3" },
+        }),
+      };
+    };
+
+    const execute = (cmd, args, opts) => {
+      commands.push({ cmd, args, cwd: opts.cwd, env: opts.env });
+      if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+        execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+        const archive = args.find(a => a.startsWith("--filename=")).slice("--filename=".length);
+        packedIntegrity = tarballIntegrity(readFileSync(archive));
+        packedManifest = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
+        return "";
+      }
+      return "";
+    };
+
+    const logs = [];
+    const { log } = console;
+    console.log = (...args) => logs.push(args.join(" "));
+    let code;
+    try {
+      code = await runPrerelease(
+        config,
+        { preid: "integration", distTag: "integration" },
+        { fetch: fetcher, tokenSource: () => ({ token: "test-token", source: "GITHUB_TOKEN" }), execute },
+      );
+    } finally {
+      console.log = log;
+    }
+
+    assert.equal(code, 0);
+    assert.equal(logs.at(-1), "0.3.0-integration.3", "bare version printed on last stdout line");
+    assert.equal(packedManifest.name, "@maxvyshniakov/example");
+    assert.equal(packedManifest.version, "0.3.0-integration.3");
+    assert.equal(packedManifest.gitHead, head);
+    // Publish command received the packed archive and --tag=integration (no --dry-run).
+    const publishCmd = commands.find(c => c.cmd === "bun" && c.args[0] === "publish");
+    assert.ok(publishCmd, "bun publish was invoked");
+    assert.ok(publishCmd.args.includes("--tag=integration"));
+    assert.ok(!publishCmd.args.includes("--dry-run"));
+    // Caller's working tree, package.json and git tags are untouched.
+    assert.equal(readFileSync(path.join(repository.root, "package.json"), "utf8"), manifestBefore);
+    assert.equal(repository.git("status", "--porcelain"), "");
+    assert.equal(repository.git("tag", "--list"), "");
+    // Only registry packument GETs were made (no GitHub status/release-gate API calls and zero notify dispatches).
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every(r => r.url.startsWith("https://npm.pkg.github.com/") && r.method === "GET"));
+  } finally {
+    repository.cleanup();
+  }
+});
+
+test("runPrerelease refuses dirty tree without --ref, and archives exact --ref commit ignoring working-tree dirt", async () => {
+  const repository = tempRepository(rootPackageFiles({ "index.js": "export const v = 1;\n" }), { git: true });
+  try {
+    const firstSha = repository.git("rev-parse", "HEAD");
+    writeFileSync(path.join(repository.root, "index.js"), "export const v = 2;\n");
+    repository.git("add", "index.js");
+    repository.git("commit", "--quiet", "-m", "second commit");
+    // Dirty working tree file that must not leak.
+    writeFileSync(path.join(repository.root, "dirty.txt"), "uncommitted dirt\n");
+
+    const config = withDefaults({});
+    config.root = repository.root;
+    const errors = [];
+    const { error: origError } = console;
+    console.error = (...args) => errors.push(args.join(" "));
+    try {
+      const dirtyCode = await runPrerelease(
+        config,
+        { preid: "integration", distTag: "integration" },
+        { tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }) },
+      );
+      assert.equal(dirtyCode, 1);
+      assert.match(errors.join("\n"), /uncommitted changes/);
+    } finally {
+      console.error = origError;
+    }
+
+    // With explicit --ref <firstSha>, archives firstSha cleanly without dirty.txt.
+    let packedFiles = "";
+    let packedManifest;
+    let packedIntegrity;
+    let call = 0;
+    const fetcher = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => (call++ === 0
+        ? { versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }
+        : {
+          versions: { "0.2.0": {}, "0.3.0-integration.1": { gitHead: firstSha, dist: { integrity: packedIntegrity } } },
+          "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.1" },
+        }),
+    });
+    const execute = (cmd, args, opts) => {
+      if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+        execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+        const archive = args.find(a => a.startsWith("--filename=")).slice("--filename=".length);
+        packedIntegrity = tarballIntegrity(readFileSync(archive));
+        packedFiles = execFileSync("tar", ["-tf", archive], { encoding: "utf8" });
+        packedManifest = JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" }));
+      }
+      return "";
+    };
+    const code = await quietly(() => runPrerelease(
+      config,
+      { preid: "integration", distTag: "integration", ref: firstSha },
+      { fetch: fetcher, tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }), execute },
+    ));
+    assert.equal(code, 0);
+    assert.equal(packedManifest.gitHead, firstSha);
+    assert.doesNotMatch(packedFiles, /dirty\.txt/);
+  } finally {
+    repository.cleanup();
+  }
+});
+
+test("runPrerelease refuses missing/prerelease latest, prepack name/version/gitHead mutations, and missing dist exports", async () => {
+  const captureErrors = async fn => {
+    const lines = [];
+    const { error } = console;
+    console.error = (...args) => lines.push(args.join(" "));
+    try {
+      const code = await quietly(fn);
+      return { code, stderr: lines.join("\n") };
+    } finally {
+      console.error = error;
+    }
+  };
+
+  // 1. Missing latest, prerelease latest, or latest missing from versions -> refused before packing.
+  const baseRepo = tempRepository(rootPackageFiles(), { git: true });
+  try {
+    const config = withDefaults({});
+    config.root = baseRepo.root;
+    for (const resp of [
+      404,
+      { versions: { "0.3.0-rc.1": {} }, "dist-tags": { latest: "0.3.0-rc.1" } },
+      { versions: {}, "dist-tags": { latest: "0.2.0" } },
+    ]) {
+      const res = await captureErrors(() => runPrerelease(
+        config,
+        { preid: "integration", distTag: "integration" },
+        { fetch: fakeRegistry([resp]).fetch, tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }) },
+      ));
+      assert.equal(res.code, 1);
+      assert.match(res.stderr, /no established stable latest version/);
+    }
+  } finally {
+    baseRepo.cleanup();
+  }
+
+  // 2. Prepack mutating gitHead, version, or name -> refused before upload.
+  for (const mutation of [
+    "delete p.gitHead",
+    'p.version = "9.9.9"',
+    'p.name = "@maxvyshniakov/other"',
+  ]) {
+    const repo = tempRepository(rootPackageFiles({
+      "package.json": {
+        name: "@maxvyshniakov/example",
+        version: "0.2.0",
+        type: "module",
+        scripts: { prepack: `node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));${mutation};fs.writeFileSync("package.json",JSON.stringify(p,null,2))'` },
+      },
+    }), { git: true });
+    try {
+      const config = withDefaults({});
+      config.root = repo.root;
+      let published = false;
+      const res = await captureErrors(() => runPrerelease(
+        config,
+        { preid: "integration", distTag: "integration" },
+        {
+          fetch: fakeRegistry([{ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }]).fetch,
+          tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }),
+          execute: (cmd, args, opts) => {
+            if (cmd === "bun" && args[0] === "publish") published = true;
+            return execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+          },
+        },
+      ));
+      assert.equal(res.code, 1, mutation);
+      assert.equal(published, false, mutation);
+      assert.match(res.stderr, /identity or provenance differs/, mutation);
+    } finally {
+      repo.cleanup();
+    }
+  }
+
+  // 3. Missing export target (e.g. ./dist/index.js not produced) -> refused by tarballIssues before upload.
+  const missingDist = tempRepository(rootPackageFiles({
+    "package.json": {
+      name: "@maxvyshniakov/example",
+      version: "0.2.0",
+      type: "module",
+      exports: { ".": "./dist/index.js" },
+    },
+  }), { git: true });
+  try {
+    const config = withDefaults({});
+    config.root = missingDist.root;
+    let published = false;
+    const res = await captureErrors(() => runPrerelease(
+      config,
+      { preid: "integration", distTag: "integration" },
+      {
+        fetch: fakeRegistry([{ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }]).fetch,
+        tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }),
+        execute: (cmd, args, opts) => {
+          if (cmd === "bun" && args[0] === "publish") published = true;
+          return execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+        },
+      },
+    ));
+    assert.equal(res.code, 1);
+    assert.equal(published, false);
+    assert.match(res.stderr, /packed tarball failed checks[\s\S]*\.\/dist\/index\.js/);
+  } finally {
+    missingDist.cleanup();
+  }
+});
+
+test("runPrerelease sanitizes ambient GIT_DIR, sets GIT_CEILING_DIRECTORIES, and avoids prepare during pack", async () => {
+  const repository = tempRepository(rootPackageFiles({
+    "package.json": {
+      name: "@maxvyshniakov/example",
+      version: "0.2.0",
+      type: "module",
+      scripts: {
+        // Would fail in a .git-less archive if bun pm pack ran prepare!
+        prepare: "git rev-parse --git-dir",
+      },
+    },
+  }), { git: true });
+  try {
+    const config = withDefaults({});
+    config.root = repository.root;
+    let packEnv;
+    let packArgs;
+    const code = await quietly(() => runPrerelease(
+      config,
+      { preid: "integration", distTag: "integration", dryRun: true },
+      {
+        fetch: fakeRegistry([404]).fetch,
+        env: { ...process.env, GIT_DIR: "/nonexistent/outer/.git", GIT_WORK_TREE: "/nonexistent/outer" },
+        tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }),
+        execute: (cmd, args, opts) => {
+          if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+            packEnv = opts.env;
+            packArgs = args;
+            return execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+          }
+          return "";
+        },
+      },
+    ));
+    assert.equal(code, 0);
+    assert.equal(packEnv.GIT_DIR, undefined, "GIT_DIR stripped from publishEnv");
+    assert.equal(packEnv.GIT_WORK_TREE, undefined, "GIT_WORK_TREE stripped from publishEnv");
+    assert.ok(packEnv.GIT_CEILING_DIRECTORIES, "GIT_CEILING_DIRECTORIES set");
+    assert.ok(packArgs.includes("--ignore-scripts"), "bun pm pack uses --ignore-scripts to skip prepare");
+  } finally {
+    repository.cleanup();
+  }
+});
+
+test("runPrerelease --dry-run packs a workspace package, passes --dry-run and prints bare version last", async () => {
+  const repository = tempRepository(workspaceFiles(), { git: true });
+  try {
+    const head = repository.git("rev-parse", "HEAD");
+    const config = withDefaults({});
+    config.root = repository.root;
+    const logs = [];
+    const { log } = console;
+    console.log = (...args) => logs.push(args.join(" "));
+    const commands = [];
+    try {
+      const code = await runPrerelease(
+        config,
+        { preid: "integration", distTag: "integration", dryRun: true },
+        {
+          fetch: fakeRegistry([404]).fetch,
+          tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }),
+          execute: (cmd, args, opts) => {
+            commands.push({ cmd, args });
+            if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+              return execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+            }
+            return "";
+          },
+        },
+      );
+      assert.equal(code, 0);
+    } finally {
+      console.log = log;
+    }
+    const publishCmd = commands.find(c => c.cmd === "bun" && c.args[0] === "publish");
+    assert.ok(publishCmd, "bun publish was invoked in dry-run");
+    assert.ok(publishCmd.args.includes("--tag=integration"));
+    assert.ok(publishCmd.args.includes("--dry-run"));
+    assert.match(logs.join("\n"), new RegExp(`Dry run: would publish @maxvyshniakov/example@0\\.3\\.0-integration\\.1 under dist-tag integration \\(gitHead ${head}\\)\\.`));
+    assert.equal(logs.at(-1), "0.3.0-integration.1");
+    assert.equal(repository.git("tag", "--list"), "");
+  } finally {
+    repository.cleanup();
+  }
+});
+
+test("runPrerelease post-publish verification rejects missing/wrong gitHead, integrity mismatch, dist-tag mismatch, latest drift and timeout", async () => {
+  const repository = tempRepository(rootPackageFiles(), { git: true });
+  try {
+    const head = repository.git("rev-parse", "HEAD");
+    const config = withDefaults({});
+    config.root = repository.root;
+
+    const runCase = async (buildAfter, { timeout = false } = {}) => {
+      let packedIntegrity;
+      let call = 0;
+      const fetcher = async () => {
+        if (call++ === 0) return { ok: true, status: 200, json: async () => ({ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }) };
+        if (timeout) return { ok: true, status: 200, json: async () => ({ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }) };
+        return { ok: true, status: 200, json: async () => buildAfter(packedIntegrity) };
+      };
+      let clock = 0;
+      const errors = [];
+      const { error } = console;
+      console.error = (...args) => errors.push(args.join(" "));
+      let code;
+      try {
+        code = await quietly(() => runPrerelease(
+          config,
+          { preid: "integration", distTag: "integration" },
+          {
+            fetch: fetcher,
+            tokenSource: () => ({ token: "t", source: "GITHUB_TOKEN" }),
+            sleep: async ms => { clock += ms; },
+            now: () => clock,
+            execute: (cmd, args, opts) => {
+              if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+                execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+                const archive = args.find(a => a.startsWith("--filename=")).slice("--filename=".length);
+                packedIntegrity = tarballIntegrity(readFileSync(archive));
+              }
+              return "";
+            },
+          },
+        ));
+      } finally {
+        console.error = error;
+      }
+      return { code, stderr: errors.join("\n") };
+    };
+
+    // Missing gitHead (strict check)
+    const missingGitHead = await runCase(sha => ({
+      versions: { "0.2.0": {}, "0.3.0-integration.1": { dist: { integrity: sha } } },
+      "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.1" },
+    }));
+    assert.equal(missingGitHead.code, 1);
+    assert.match(missingGitHead.stderr, /gitHead \(missing\)/);
+
+    // Wrong gitHead
+    const wrongGitHead = await runCase(sha => ({
+      versions: { "0.2.0": {}, "0.3.0-integration.1": { gitHead: "f".repeat(40), dist: { integrity: sha } } },
+      "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.1" },
+    }));
+    assert.equal(wrongGitHead.code, 1);
+    assert.match(wrongGitHead.stderr, /serves gitHead f{40}/);
+
+    // Integrity mismatch
+    const badIntegrity = await runCase(() => ({
+      versions: { "0.2.0": {}, "0.3.0-integration.1": { gitHead: head, dist: { integrity: "sha512-wrong" } } },
+      "dist-tags": { latest: "0.2.0", integration: "0.3.0-integration.1" },
+    }));
+    assert.equal(badIntegrity.code, 1);
+    assert.match(badIntegrity.stderr, /not the published tarball's/);
+
+    // dist-tags[tag] mismatch
+    const wrongTag = await runCase(sha => ({
+      versions: { "0.2.0": {}, "0.3.0-integration.1": { gitHead: head, dist: { integrity: sha } } },
+      "dist-tags": { latest: "0.2.0", integration: "0.2.0" },
+    }));
+    assert.equal(wrongTag.code, 1);
+    assert.match(wrongTag.stderr, /dist-tag integration .* names 0\.2\.0/);
+
+    // latest moved
+    const movedLatest = await runCase(sha => ({
+      versions: { "0.2.0": {}, "0.3.0-integration.1": { gitHead: head, dist: { integrity: sha } } },
+      "dist-tags": { latest: "0.3.0-integration.1", integration: "0.3.0-integration.1" },
+    }));
+    assert.equal(movedLatest.code, 1);
+    assert.match(movedLatest.stderr, /dist-tag latest .* moved from 0\.2\.0 to 0\.3\.0-integration\.1/);
+
+    // Timeout -> verification pending wording
+    const timedOut = await runCase(null, { timeout: true });
+    assert.equal(timedOut.code, 1);
+    assert.match(timedOut.stderr, /verification pending/);
+  } finally {
+    repository.cleanup();
+  }
+});
+
+test("runPrerelease on npmjs.org resolves provenance, polls packument, prints ENEEDAUTH hint and hints NPM_TOKEN on restricted 404", async () => {
+  const repository = tempRepository(rootPackageFiles(), { git: true });
+  try {
+    repository.git("remote", "add", "origin", "https://github.com/maxvyshniakov/example.git");
+    const head = repository.git("rev-parse", "HEAD");
+    const config = withDefaults({ publish: { registry: "npm", access: "public" } });
+    config.root = repository.root;
+
+    // 1. Public repo in Actions: passes --provenance, polls packument until version appears, verifies attestation.
+    let packedIntegrity;
+    let npmArgs;
+    let packumentReads = 0;
+    let clock = 0;
+    const fetcher = async url => {
+      if (url.startsWith("https://api.github.com/repos/")) {
+        return { ok: true, status: 200, json: async () => ({ visibility: "public", private: false }) };
+      }
+      packumentReads++;
+      if (packumentReads === 1) {
+        return { ok: true, status: 200, json: async () => ({ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }) };
+      }
+      if (packumentReads === 2) {
+        // Still propagating on CDN
+        return { ok: true, status: 200, json: async () => ({ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          versions: {
+            "0.2.0": {},
+            "0.3.0-next.1": {
+              gitHead: head,
+              dist: { integrity: packedIntegrity, attestations: { provenance: { predicateType: "https://slsa.dev/provenance/v1" } } },
+            },
+          },
+          "dist-tags": { latest: "0.2.0", next: "0.3.0-next.1" },
+        }),
+      };
+    };
+    const code = await quietly(() => runPrerelease(
+      config,
+      { preid: "next", distTag: "next" },
+      {
+        fetch: fetcher,
+        env: { ...process.env, GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example" },
+        tokenSource: () => ({ token: "gh-token", source: "GITHUB_TOKEN" }),
+        npmVersion: "11.19.1",
+        sleep: async ms => { clock += ms; },
+        now: () => clock,
+        execute: (cmd, args, opts) => {
+          if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+            execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+            const archive = args.find(a => a.startsWith("--filename=")).slice("--filename=".length);
+            packedIntegrity = tarballIntegrity(readFileSync(archive));
+            return "";
+          }
+          if (cmd === "npm") npmArgs = args;
+          return "";
+        },
+      },
+    ));
+    assert.equal(code, 0);
+    assert.ok(npmArgs.includes("--provenance"), "passes --provenance for public npm repo");
+    assert.ok(npmArgs.includes("--tag=next"));
+    assert.equal(packumentReads, 3, "polled past stale CDN response");
+
+    // 2. ENEEDAUTH prints trusted publishing hint.
+    const authErrors = [];
+    const { error: origError } = console;
+    console.error = (...args) => authErrors.push(args.join(" "));
+    let authCode;
+    try {
+      authCode = await quietly(() => runPrerelease(
+        config,
+        { preid: "next", distTag: "next" },
+        {
+          fetch: async url => (url.startsWith("https://api.github.com/")
+            ? { ok: true, status: 200, json: async () => ({ visibility: "public", private: false }) }
+            : { ok: true, status: 200, json: async () => ({ versions: { "0.2.0": {} }, "dist-tags": { latest: "0.2.0" } }) }),
+          env: { ...process.env, GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example" },
+          tokenSource: () => ({ token: "gh-token", source: "GITHUB_TOKEN" }),
+          npmVersion: "11.19.1",
+          execute: (cmd, args, opts) => {
+            if (cmd === "bun" && args[0] === "pm" && args[1] === "pack") {
+              execFileSync(cmd, args, { ...opts, stdio: "pipe" });
+              return "";
+            }
+            if (cmd === "npm") {
+              const err = new Error("npm failed");
+              err.stderr = "npm error code ENEEDAUTH";
+              throw err;
+            }
+            return "";
+          },
+        },
+      ));
+    } finally {
+      console.error = origError;
+    }
+    assert.equal(authCode, 1);
+    assert.match(authErrors.join("\n"), /https:\/\/www\.npmjs\.com\/package\/@maxvyshniakov\/example\/access/);
+
+    // 3. Restricted package returning 404 without NPM_TOKEN mentions NPM_TOKEN.
+    const restrictedConfig = withDefaults({ publish: { registry: "npm", access: "restricted" } });
+    restrictedConfig.root = repository.root;
+    const restrictedErrors = [];
+    console.error = (...args) => restrictedErrors.push(args.join(" "));
+    let restrictedCode;
+    try {
+      restrictedCode = await quietly(() => runPrerelease(
+        restrictedConfig,
+        { preid: "next", distTag: "next" },
+        {
+          fetch: fakeRegistry([404]).fetch,
+          env: { ...process.env, GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example", NPM_TOKEN: "" },
+          tokenSource: () => ({ token: "gh-token", source: "GITHUB_TOKEN" }),
+          npmVersion: "11.19.1",
+        },
+      ));
+    } finally {
+      console.error = origError;
+    }
+    assert.equal(restrictedCode, 1);
+    assert.match(restrictedErrors.join("\n"), /NPM_TOKEN/);
+
+    // 4. --dry-run still validates npmVersion even outside Actions.
+    const dryRunErrors = [];
+    console.error = (...args) => dryRunErrors.push(args.join(" "));
+    let dryRunCode;
+    try {
+      dryRunCode = await quietly(() => runPrerelease(
+        config,
+        { preid: "next", distTag: "next", dryRun: true },
+        { fetch: fakeRegistry([404]).fetch, env: { ...process.env, GITHUB_ACTIONS: "" }, npmVersion: "10.9.2" },
+      ));
+    } finally {
+      console.error = origError;
+    }
+    assert.equal(dryRunCode, 1);
+    assert.match(dryRunErrors.join("\n"), /npm 10\.9\.2 is older than 11\.5\.1/);
+  } finally {
+    repository.cleanup();
+  }
 });

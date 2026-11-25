@@ -23,18 +23,111 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { parseChangelog } from "./changelog.mjs";
 import { changelogIssues, changelogPackages } from "./check-changelogs.mjs";
-import { gitRunner } from "./git.mjs";
+import { cleanEnvironment, gitRunner } from "./git.mjs";
 import { client as githubClient, registryUrl, repositoryOf } from "./github.mjs";
 import { notifyAll } from "./notify.mjs";
-import { runPackedConsumer } from "./packed-consumer.mjs";
-import { versionCommitOf } from "./packages.mjs";
-import { NPM_REGISTRY, registriesOf, registryClient, tarballIntegrity, verifyPublication } from "./registry.mjs";
+import { inspectTarball, runPackedConsumer, tarballIssues } from "./packed-consumer.mjs";
+import { MANIFEST_FILE, versionCommitOf } from "./packages.mjs";
+import { NPM_REGISTRY, publicationIssues, registriesOf, registryClient, tarballIntegrity, verifyPublication } from "./registry.mjs";
 import { attestationRefusal, publishGatePlan, readAttestation, releaseGate } from "./release-gate.mjs";
-import { compareVersions } from "./semver.mjs";
+import { compareVersions, nextVersion, parseVersion } from "./semver.mjs";
 import { resolveToken } from "./token.mjs";
 
 export { registryUrl, repositoryOf as githubRepository };
+
+const IDENTIFIER = /^[a-z](?:[a-z0-9-]*[a-z0-9])?$/;
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * Parses CLI arguments for `package-kit publish`.
+ * Supports release mode (`[--resume]`) and prerelease mode
+ * (`--prerelease <preid> --dist-tag <tag> [--ref <sha>] [--dry-run]`).
+ */
+export function parsePublishArgs(args = []) {
+  let resume = false;
+  let dryRun = false;
+  let prerelease;
+  let distTag;
+  let ref;
+  const setOnce = (name, current, value) => {
+    if (current !== undefined) throw new Error(`Duplicate ${name}`);
+    if (value === undefined || value === "") throw new Error(`${name} requires a value`);
+    return value;
+  };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--resume") resume = true;
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--prerelease") prerelease = setOnce("--prerelease", prerelease, args[++i]);
+    else if (arg.startsWith("--prerelease=")) prerelease = setOnce("--prerelease", prerelease, arg.slice("--prerelease=".length));
+    else if (arg === "--dist-tag") distTag = setOnce("--dist-tag", distTag, args[++i]);
+    else if (arg.startsWith("--dist-tag=")) distTag = setOnce("--dist-tag", distTag, arg.slice("--dist-tag=".length));
+    else if (arg === "--ref") ref = setOnce("--ref", ref, args[++i]);
+    else if (arg.startsWith("--ref=")) ref = setOnce("--ref", ref, arg.slice("--ref=".length));
+    else throw new Error(`Unknown publish option: ${arg}`);
+  }
+  const hasPrereleaseOption = prerelease !== undefined || distTag !== undefined || ref !== undefined || dryRun;
+  if (!hasPrereleaseOption) return { mode: "release", resume };
+  if (resume) throw new Error("--resume cannot be combined with prerelease publish options");
+  if (prerelease === undefined || distTag === undefined) {
+    throw new Error("--prerelease and --dist-tag must be given together");
+  }
+  if (!IDENTIFIER.test(prerelease)) {
+    throw new Error(`Invalid --prerelease identifier "${prerelease}": use lowercase letters, digits and hyphens starting with a letter`);
+  }
+  if (distTag === "latest") {
+    throw new Error('--dist-tag cannot be "latest"; prereleases must publish under a non-latest dist-tag');
+  }
+  if (!IDENTIFIER.test(distTag)) {
+    throw new Error(`Invalid --dist-tag "${distTag}": use lowercase letters, digits and hyphens starting with a letter`);
+  }
+  if (ref !== undefined && ref.startsWith("-")) {
+    throw new Error(`Invalid --ref "${ref}": expected a git ref or commit SHA`);
+  }
+  return { mode: "prerelease", preid: prerelease, distTag, ref, dryRun };
+}
+
+/** True when the changelog's Unreleased body holds a breaking entry. */
+export function hasBreakingEntry(unreleased = "") {
+  return /^###\s+Breaking\s*$/m.test(unreleased) || /^\s*-\s+Breaking:/m.test(unreleased);
+}
+
+/**
+ * Computes the next prerelease version `X.Y.Z-<preid>.N` (N starting at 1):
+ * next minor after the newest stable release (current or published), or next
+ * major for a breaking entry from 1.0.0 on.
+ */
+export function prereleaseVersion({ current, published = [], unreleased = "", preid }) {
+  if (!IDENTIFIER.test(preid ?? "")) {
+    throw new Error(`Invalid --prerelease identifier "${preid ?? ""}": use lowercase letters, digits and hyphens starting with a letter`);
+  }
+  const releases = [current, ...published.filter(version => /^\d+\.\d+\.\d+$/.test(version))];
+  const newest = releases.reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b));
+  const level = hasBreakingEntry(unreleased) && parseVersion(newest)[0] >= 1 ? "major" : "minor";
+  const base = nextVersion(newest, level);
+  const prefix = `${base}-${preid}.`;
+  const taken = published
+    .filter(version => version.startsWith(prefix))
+    .map(version => version.slice(prefix.length))
+    .filter(suffix => /^\d+$/.test(suffix))
+    .map(Number);
+  const n = taken.length ? Math.max(...taken) + 1 : 1;
+  return { base, level, version: `${prefix}${n}` };
+}
+
+/**
+ * Extracts `commit`'s committed tree from the repository at `root` into
+ * `into`. Takes a full 40-hex commit SHA so working-tree dirt or a later
+ * branch movement cannot leak into the published archive.
+ */
+export function archiveCommit({ root, commit, into, env = process.env }) {
+  if (!FULL_SHA.test(commit)) throw new Error(`archiveCommit requires a full commit SHA, got ${commit}`);
+  const clean = cleanEnvironment(env);
+  const tar = execFileSync("git", ["-C", root, "archive", "--format=tar", commit], { maxBuffer: 1024 * 1024 * 1024, env: clean });
+  execFileSync("tar", ["-x", "-C", into], { input: tar, env: clean });
+}
 
 // The release commit is identified by SHA, not by the checked-out branch's
 // name: a worktree or a detached HEAD at origin/main publishes the same commit
@@ -101,7 +194,7 @@ export function provenanceWanted({ repositoryPublic, access }) {
  * pointed at npmjs.org too, and --userconfig points at os.devNull so
  * $HOME/.npmrc cannot leak an _authToken or bypass OIDC trusted publishing.
  */
-export function npmPublishArguments({ tarball, name, access = "public", provenance = false }) {
+export function npmPublishArguments({ tarball, name, access = "public", provenance = false, tag, dryRun = false }) {
   const scope = name.startsWith("@") ? name.slice(0, name.indexOf("/")) : undefined;
   return [
     "publish", tarball,
@@ -109,7 +202,9 @@ export function npmPublishArguments({ tarball, name, access = "public", provenan
     `--registry=${NPM_REGISTRY}`,
     ...(scope ? [`--${scope}:registry=${NPM_REGISTRY}`] : []),
     `--access=${access}`,
+    ...(tag ? [`--tag=${tag}`] : []),
     ...(provenance ? ["--provenance"] : []),
+    ...(dryRun ? ["--dry-run"] : []),
   ];
 }
 
@@ -135,8 +230,13 @@ function npmPublishEnvironment(env) {
 
 // `bun --config <file> publish` exits 0 without publishing anything; the flag
 // belongs after the subcommand. With a tarball, bun uploads that archive.
-export function publishArguments(config, tarball) {
-  return [...(tarball ? ["publish", tarball] : ["publish"]), ...(config ? [`--config=${config}`] : [])];
+export function publishArguments(config, tarball, { tag, dryRun = false } = {}) {
+  return [
+    ...(tarball ? ["publish", tarball] : ["publish"]),
+    ...(config ? [`--config=${config}`] : []),
+    ...(tag ? [`--tag=${tag}`] : []),
+    ...(dryRun ? ["--dry-run"] : []),
+  ];
 }
 
 /**
@@ -363,10 +463,8 @@ export async function runPublish(config, { resume = false, fetch: fetcher = glob
             const out = execFileSync("npm", npmPublishArguments({ tarball: archive.tarball, name: pkg.name, access, provenance }), { cwd: workDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: npmPublishEnvironment(env) });
             if (out) process.stdout.write(out);
           } catch (error) {
-            if (error?.stdout) process.stdout.write(error.stdout);
-            if (error?.stderr) process.stderr.write(error.stderr);
-            const hint = npmTrustedPublishingHint({ name: pkg.name, output: `${error?.stdout ?? ""}\n${error?.stderr ?? ""}` });
-            if (hint) return fail(hint);
+            const hinted = handleNpmPublishError(error, pkg.name, fail);
+            if (hinted !== undefined) return hinted;
             throw error;
           }
         }
@@ -425,4 +523,244 @@ function packArchive(pkg, workDir) {
   const tarball = execFileSync("bun", ["pm", "pack", "--quiet", "--destination", workDir], { cwd: pkg.dir, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim().split("\n").at(-1);
   if (!fs.existsSync(tarball)) throw new Error(`bun pm pack did not produce ${tarball}`);
   return tarball;
+}
+
+function handleNpmPublishError(error, name, fail) {
+  if (error?.stdout) process.stdout.write(error.stdout);
+  if (error?.stderr) process.stderr.write(error.stderr);
+  const hint = npmTrustedPublishingHint({ name, output: `${error?.stdout ?? ""}\n${error?.stderr ?? ""}` });
+  return hint ? fail(hint) : undefined;
+}
+
+/**
+ * Publishes an immutable prerelease (`X.Y.Z-<preid>.N`) from a captured commit
+ * under a non-latest `--dist-tag`, skipping the release gate and never creating
+ * git tags or mutating the caller's working tree.
+ */
+export async function runPrerelease(
+  config,
+  { preid, distTag, ref, dryRun = false } = {},
+  { fetch: fetcher = globalThis.fetch, env = process.env, tokenSource = resolveToken, execute = execFileSync, sleep, now, npmVersion } = {},
+) {
+  const parsed = parsePublishArgs([
+    ...(preid !== undefined ? ["--prerelease", preid] : []),
+    ...(distTag !== undefined ? ["--dist-tag", distTag] : []),
+    ...(ref !== undefined ? ["--ref", ref] : []),
+    ...(dryRun ? ["--dry-run"] : []),
+  ]);
+  const { root } = config;
+  const registries = registriesOf(config.publish?.registry);
+  const access = config.publish?.access ?? "public";
+  const baseEnv = cleanEnvironment(env);
+  const git = gitRunner(root, { env: baseEnv });
+  const fail = (lines) => {
+    for (const line of lines) console.error(line);
+    return 1;
+  };
+
+  if (parsed.ref === undefined && git("status", "--porcelain")) {
+    return fail(["Not publishing prerelease: the working tree has uncommitted changes (commit them, or pass --ref <ref>)."]);
+  }
+  let commit;
+  try {
+    commit = parsed.ref !== undefined
+      ? git("rev-parse", "--verify", `${parsed.ref}^{commit}`)
+      : git("rev-parse", "HEAD");
+  } catch {
+    return fail([`Not publishing prerelease: could not resolve ${parsed.ref ?? "HEAD"} to a full commit SHA.`]);
+  }
+  if (!FULL_SHA.test(commit)) {
+    return fail([`Not publishing prerelease: could not resolve ${parsed.ref ?? "HEAD"} to a full commit SHA.`]);
+  }
+
+  const needsToken = registries.includes("github") || (registries.includes("npm") && !parsed.dryRun);
+  const { token, source } = needsToken ? tokenSource(baseEnv) : { token: undefined, source: undefined };
+  if (needsToken && !token) {
+    return fail([
+      registries.includes("github")
+        ? "Not publishing prerelease: GITHUB_TOKEN is not set and gh has no token; use GITHUB_TOKEN=$(gh auth token) with the write:packages scope"
+        : "Not publishing prerelease: GITHUB_TOKEN is not set and gh has no token; reading repository visibility for npm provenance needs it",
+    ]);
+  }
+  if (token && source && source !== "GITHUB_TOKEN") console.log(`GITHUB_TOKEN unset; publishing with ${source}.`);
+
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-prerelease-"));
+  try {
+    const checkout = path.join(scratch, "source");
+    fs.mkdirSync(checkout);
+    archiveCommit({ root, commit, into: checkout, env: baseEnv });
+
+    const quickStart = config.changelog?.quickStart;
+    const [pkg, ...others] = changelogPackages(checkout, { quickStart });
+    if (!pkg || others.length) {
+      return fail(["Not publishing prerelease: expected exactly one released package (the root package or one under packages/)."]);
+    }
+
+    if (registries.includes("npm")) {
+      const blockers = npmBlockers({
+        registries,
+        inActions: parsed.dryRun ? true : Boolean(baseEnv.GITHUB_ACTIONS),
+        oidc: parsed.dryRun ? true : Boolean(baseEnv.ACTIONS_ID_TOKEN_REQUEST_URL),
+        npmVersion: npmVersion !== undefined ? npmVersion : installedNpm(),
+        publishConfigRegistry: pkg.manifest.publishConfig?.registry,
+      });
+      if (blockers.length) return fail([`Not publishing ${pkg.name} prerelease:`, ...blockers.map(blocker => `  ${blocker}`)]);
+    }
+
+    let unreleased = "";
+    if (pkg.changelog !== undefined) {
+      const changelog = parseChangelog(pkg.changelog);
+      if (changelog.errors.length) {
+        return fail([`Not publishing ${pkg.name} prerelease: CHANGELOG.md is malformed:`, ...changelog.errors.map(error => `  ${error}`)]);
+      }
+      unreleased = changelog.unreleased;
+    }
+
+    const clients = Object.fromEntries(registries.map(kind => [kind, registryClient({
+      kind,
+      token: kind === "github" ? token : baseEnv.NPM_TOKEN,
+      fetch: fetcher,
+      ...(sleep ? { sleep } : {}),
+      ...(now ? { now } : {}),
+    })]));
+
+    const before = {};
+    const publishedSet = new Set();
+    for (const kind of registries) {
+      const packument = await clients[kind].packument(pkg.name);
+      before[kind] = packument;
+      const existingVersions = Object.keys(packument.versions ?? {});
+      for (const ver of existingVersions) publishedSet.add(ver);
+      if (!parsed.dryRun) {
+        const latest = packument["dist-tags"]?.latest;
+        if (!/^\d+\.\d+\.\d+$/.test(latest ?? "") || !packument.versions?.[latest]) {
+          const restrictedHint = kind === "npm" && access === "restricted" && !baseEnv.NPM_TOKEN && existingVersions.length === 0
+            ? " (for a restricted npm package, set NPM_TOKEN so package-kit can read existing versions)"
+            : "";
+          return fail([
+            `Not publishing ${pkg.name} prerelease: ${clients[kind].url} has no established stable latest version${restrictedHint}; first publication may assign latest even with --dist-tag ${parsed.distTag}.`,
+          ]);
+        }
+      }
+    }
+
+    const { version, level } = prereleaseVersion({
+      current: pkg.version,
+      published: [...publishedSet],
+      unreleased,
+      preid: parsed.preid,
+    });
+    console.log(`${pkg.name} ${pkg.version} -> ${version} (next ${level}, dist-tag ${parsed.distTag}, commit ${commit.slice(0, 12)})`);
+
+    const publishEnv = { ...baseEnv, GIT_CEILING_DIRECTORIES: scratch, ...(token ? { GITHUB_TOKEN: token } : {}) };
+    if (fs.existsSync(path.join(checkout, "bun.lock"))) {
+      execute("bun", ["install", "--frozen-lockfile", "--ignore-scripts", "--no-progress"], { cwd: checkout, stdio: "inherit", env: publishEnv });
+    }
+
+    const manifestPath = path.join(pkg.dir, MANIFEST_FILE);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version, gitHead: commit }, null, 2)}\n`);
+
+    if (manifest.scripts?.prepack) {
+      execute("bun", ["run", "prepack"], { cwd: pkg.dir, stdio: "inherit", env: publishEnv });
+    }
+    const archive = path.join(scratch, "package.tgz");
+    execute("bun", ["pm", "pack", "--ignore-scripts", `--filename=${archive}`], { cwd: pkg.dir, stdio: "inherit", env: publishEnv });
+    const { files, packedManifest: packed } = inspectTarball(archive);
+    if (packed.name !== pkg.name || packed.version !== version || packed.gitHead !== commit) {
+      return fail([
+        `Not publishing ${pkg.name}@${version}: packed ${MANIFEST_FILE} identity or provenance differs from the captured prerelease (got ${packed.name}@${packed.version}, gitHead ${packed.gitHead ?? "(missing)"}).`,
+      ]);
+    }
+    const archiveProblems = tarballIssues({ manifest: { ...manifest, version }, packedManifest: packed, files });
+    if (archiveProblems.length) {
+      return fail([`Not publishing ${pkg.name}@${version}: packed tarball failed checks:`, ...archiveProblems.map(problem => `  ${problem}`)]);
+    }
+    const integrity = tarballIntegrity(fs.readFileSync(archive));
+
+    let provenance = false;
+    if (registries.includes("npm") && !parsed.dryRun) {
+      const github = githubClient({
+        token,
+        repository: () => repositoryOf(git("remote", "get-url", "origin")),
+        fetch: fetcher,
+      });
+      const visibility = await github.repositoryInfo().then(info => info.visibility ?? (info.private ? "private" : "public"));
+      provenance = provenanceWanted({ repositoryPublic: visibility === "public", access });
+    }
+
+    const bunfig = path.join(checkout, "bunfig.toml");
+    for (const kind of registries) {
+      if (kind === "github") {
+        execute("bun", publishArguments(fs.existsSync(bunfig) ? bunfig : undefined, archive, { tag: parsed.distTag, dryRun: parsed.dryRun }), {
+          cwd: pkg.dir,
+          stdio: "inherit",
+          env: publishEnv,
+        });
+      } else {
+        try {
+          const out = execute("npm", npmPublishArguments({ tarball: archive, name: pkg.name, access, provenance, tag: parsed.distTag, dryRun: parsed.dryRun }), {
+            cwd: scratch,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+            env: npmPublishEnvironment(publishEnv),
+          });
+          if (out) process.stdout.write(out);
+        } catch (error) {
+          const hinted = handleNpmPublishError(error, pkg.name, fail);
+          if (hinted !== undefined) return hinted;
+          throw error;
+        }
+      }
+    }
+
+    if (parsed.dryRun) {
+      console.log(`Dry run: would publish ${pkg.name}@${version} under dist-tag ${parsed.distTag} (gitHead ${commit}).`);
+      console.log(version);
+      return 0;
+    }
+
+    for (const kind of registries) {
+      const after = await clients[kind].waitForPackument(
+        pkg.name,
+        doc => Boolean(doc.versions?.[version]),
+        { onWait: ({ intervalMs }) => console.log(`Waiting for ${clients[kind].url} to serve ${pkg.name}@${version}; checking again in ${intervalMs / 1000} s.`) },
+      );
+      if (!after) {
+        return fail([
+          `Published ${pkg.name}@${version}, verification pending: ${clients[kind].url} does not serve ${version} yet (do not bump and republish until verified).`,
+        ]);
+      }
+      const served = after.versions[version];
+      if (served.gitHead !== commit) {
+        return fail([`Published ${pkg.name}@${version}, but ${clients[kind].url} serves gitHead ${served.gitHead ?? "(missing)"} instead of ${commit}.`]);
+      }
+      const issues = publicationIssues({
+        kind,
+        name: pkg.name,
+        version,
+        manifest: served,
+        integrity,
+        requireAttestation: kind === "npm" && provenance,
+      });
+      if (issues.length) {
+        return fail([`Published ${pkg.name}@${version}, but registry verification failed:`, ...issues.map(issue => `  ${issue}`)]);
+      }
+      const tags = after["dist-tags"] ?? {};
+      if (tags[parsed.distTag] !== version) {
+        return fail([`Published ${pkg.name}@${version}, but dist-tag ${parsed.distTag} on ${clients[kind].url} names ${tags[parsed.distTag] ?? "(none)"}.`]);
+      }
+      if (tags.latest !== before[kind]["dist-tags"]?.latest) {
+        return fail([
+          `Published ${pkg.name}@${version}, but dist-tag latest on ${clients[kind].url} moved from ${before[kind]["dist-tags"]?.latest} to ${tags.latest}; restore it with npm dist-tag.`,
+        ]);
+      }
+    }
+
+    console.log(`Published ${pkg.name}@${version} (dist-tag ${parsed.distTag}, gitHead ${commit}).`);
+    console.log(version);
+    return 0;
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
 }

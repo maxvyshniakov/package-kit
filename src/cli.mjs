@@ -30,6 +30,7 @@ const USAGE = `Usage: package-kit <command>
   release-gate --mode              print release.gate: local or ci
   ci-gate                          in a workflow: whether a job that needs the checks runs (PACKAGE_KIT_NEEDS)
   publish [--resume]
+  publish --prerelease <preid> --dist-tag <tag> [--ref <ref>] [--dry-run]
   notify                           request publish.notify's workflows again
   friction <log|report|export>     deprecated: the local agent friction journal, moving to mastack
   packed-consumer [--keep]`;
@@ -211,12 +212,10 @@ export async function main([command, ...args]) {
       return runCiGate(config);
     }
     case "publish": {
-      if (args.some(arg => arg === "--prerelease" || arg.startsWith("--prerelease=") || arg === "--dist-tag" || arg.startsWith("--dist-tag=") || arg === "--dry-run")) {
-        throw new Error("publish --prerelease was removed in 0.10.0; publish a release with `package-kit release` and `package-kit publish`");
-      }
-      if (args.some(arg => arg !== "--resume")) throw new Error("Unknown publish option; the only one is --resume");
-      const { runPublish } = await import("./publish.mjs");
-      return runPublish(config, { resume: args.includes("--resume") });
+      const { parsePublishArgs, runPrerelease, runPublish } = await import("./publish.mjs");
+      const options = parsePublishArgs(args);
+      if (options.mode === "prerelease") return runPrerelease(config, options);
+      return runPublish(config, { resume: options.resume });
     }
     case "notify": {
       const [{ notifyAll }, { resolveToken }] = await Promise.all([import("./notify.mjs"), import("./token.mjs")]);

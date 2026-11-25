@@ -234,7 +234,7 @@ export default {
 | `release [<package>:]<patch\|minor\|major\|x.y.z> [--date=]` | Cuts `## Unreleased` into a version; sets `package.json`, `bun.lock` and the quick start. |
 | `release-gate [<ref>] [--rerun] [--no-attest]` | The local [release gate](#release-gate) on a commit (default `HEAD`): a clean worktree, frozen install, `verify --release`, `verify --browser` with Chromium in software compositing; records the commit status `Library checks (local, <os>-<arch>)`, such as `(local, darwin-arm64)`. `--mode` prints `release.gate`. |
 | `ci-gate` | In a workflow job that needs the checks (`deploy-storybook.yml`): writes `run=true` under gate `local`, or under gate `ci` when every job in `PACKAGE_KIT_NEEDS` (the caller's `toJSON(needs)`) passed. |
-| `publish [--resume]` | HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes to `publish.registry` ([npmjs.org](#publishing-to-npmjsorg) packs one archive and checks it first), waits until every registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication: the registries still missing the version, then the tag. |
+| `publish [--resume]` / `publish --prerelease <preid> --dist-tag <tag> [--ref <ref>] [--dry-run]` | Release mode: HEAD must be `origin/main` by SHA (any branch, worktree or detached HEAD); the [release gate](#release-gate) on that commit: a passed `release-gate` status (gate `local`) or the checks workflow (gate `ci`), not inside Actions; publishes to `publish.registry` ([npmjs.org](#publishing-to-npmjsorg) packs one archive and checks it first), waits until every registry serves the version, tags `v<version>` (GH007 recovery printed when the tag push is declined), then requests `publish.notify`. `--resume` finishes a partial publication: the registries still missing the version, then the tag. [Prerelease mode](#prerelease-publishing): archives a captured commit (`HEAD` or `--ref`), bumps `X.Y.Z-<preid>.N` from the registry, skips the release gate, never tags or mutates the checkout, refuses `--dist-tag latest`, and prints the published version on the last line of stdout. |
 | `notify` | Requests `publish.notify`'s workflows again. |
 | `heavy <slots\|all> <command...>` | Runs a command under `slotfather run -n <slots>` when slotfather is on PATH and no lease is held; otherwise directly. |
 | `packed-consumer [--keep]` | Packs (or, from `publish`, takes the archive it is about to upload), installs into a temporary consumer, imports every entrypoint in plain Node, type-checks under `nodenext` without `skipLibCheck`, then runs the probes. Optional peers are not installed. |
@@ -243,7 +243,7 @@ export default {
 | `test-hygiene [--init\|--update]` | [Shrink-only test rules](#test-hygiene): fixed sleeps, timing assertions outside the perf suite and, opt-in, class-name and CSS-text assertions. Runs without `package-kit.config.mjs` too. |
 | `verified-tree` | In a workflow: links each `PACKAGE_KIT_PLANS` plan to a passed result of the same tree ([skipping a verified tree](#skipping-a-verified-tree)). |
 | `friction <log\|report\|export>` | Deprecated, moving to Mastack's `friction`; prints a deprecation line on stderr. The local [friction journal](#friction-journal): writes an event, ranks the journal, writes a redacted bundle to share. Needs no `package-kit.config.mjs`. |
-| `tls`, `adopt`, `rust` | Removed in 0.10.0: each exits 1 and says what to use instead. `publish --prerelease` likewise. |
+| `tls`, `adopt`, `rust` | Removed in 0.10.0: each exits 1 and says what to use instead. |
 
 ## Test hygiene
 
@@ -737,6 +737,37 @@ access URL.
 Reading npmjs.org needs no token for a public package; for a restricted one, set `NPM_TOKEN` to a read token so
 `publish` can see the version. Publishing a package to npmjs.org for the first time, like any change of registry,
 is the owner's decision.
+
+## Prerelease publishing
+
+```sh
+package-kit publish --prerelease integration --dist-tag integration
+package-kit publish --prerelease integration --dist-tag integration --ref <ref> --dry-run
+```
+
+Publishes a prerelease (`X.Y.Z-<preid>.N`) of a single committed tree under an explicit non-`latest` dist-tag so
+downstream consumers (such as Data Grid's integration branch) can install unreleased APIs by exact version without
+duplicating publish or token plumbing:
+
+- **Options:** `--prerelease <preid>` and `--dist-tag <tag>` are required together, cannot be combined with `--resume`,
+  and must be lowercase identifiers (`[a-z][a-z0-9-]*`, no trailing hyphen). `--dist-tag latest` is always refused.
+  `--ref <ref>` selects the commit to archive (default: `HEAD`; without `--ref`, uncommitted working-tree changes are
+  refused). `--dry-run` builds, packs, checks the tarball and provenance, and passes `--dry-run` to the registry
+  publish command.
+- **Version:** picks the next minor after the newest stable release (local `package.json` or registry packument), or
+  the next major when `## Unreleased` in `CHANGELOG.md` has a breaking entry from `1.0.0` onward, then increments `N`
+  past any existing `X.Y.Z-<preid>.N` on the registry (starting at `1`).
+- **Immutable archive:** captures the full 40-hex commit SHA, extracts it with `git archive` into a temporary checkout
+  with sanitized `GIT_*` environment variables and `GIT_CEILING_DIRECTORIES` set so working-tree dirt and outer repos
+  cannot leak in, rewrites only the temp `package.json` with `version` and `gitHead`, runs `prepack` (if declared) then
+  `bun pm pack --ignore-scripts` (avoiding `prepare`), checks the packed tarball with `inspectTarball` and
+  `tarballIssues`, and verifies `name`, `version`, and `gitHead` before uploading with `--tag=<tag>`.
+- **Safety & output:** skips the release gate, creates no Git tags, sends no `publish.notify` dispatches, and leaves
+  the caller's working tree untouched. Non-dry-run uploads refuse if the target registry has no established stable
+  `latest` version (a first upload may assign `latest` even with `--tag`), and poll after upload to verify the served
+  `gitHead`, `dist.integrity` (and npm provenance attestation when requested), `dist-tags[tag]`, and unchanged
+  `dist-tags.latest`. On success (including `--dry-run`), prints the bare prerelease version on the last line of stdout
+  so wrapper scripts can capture it cleanly.
 
 ## GITHUB_TOKEN
 

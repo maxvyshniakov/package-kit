@@ -25,20 +25,33 @@ for (const command of ["tls", "adopt", "rust"]) {
 test("help lists no removed command", () => {
   const result = cli(["help"]);
   assert.equal(result.status, 0);
-  for (const command of [...Object.keys(REMOVED_COMMANDS), "--prerelease"]) {
+  for (const command of Object.keys(REMOVED_COMMANDS)) {
     assert.doesNotMatch(result.stdout, new RegExp(`^ {2}${command}\\b|${command} `, "m"), command);
   }
   assert.match(result.stdout, /^ {2}heavy <slots\|all> <command\.\.\.>/m);
+  assert.match(result.stdout, /^ {2}publish \[--resume\]$/m);
+  assert.match(result.stdout, /^ {2}publish --prerelease <preid> --dist-tag <tag> \[--ref <ref>\] \[--dry-run\]$/m);
 });
 
-test("publish --prerelease fails with the removal, before anything is published", () => {
-  const repository = tempRepository(rootPackageFiles());
+test("publish --prerelease validates its options and routes valid flags to runPrerelease", () => {
+  const repository = tempRepository(rootPackageFiles(), { git: true });
   try {
-    for (const args of [["--prerelease", "integration", "--dist-tag", "integration"], ["--dry-run"]]) {
-      const result = cli(["publish", ...args], { cwd: repository.root });
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /^package-kit: publish --prerelease was removed in 0\.10\.0/);
-    }
+    const latest = cli(["publish", "--prerelease", "integration", "--dist-tag", "latest"], { cwd: repository.root });
+    assert.equal(latest.status, 1);
+    assert.match(latest.stderr, /--dist-tag cannot be "latest"/);
+
+    const unpaired = cli(["publish", "--dry-run"], { cwd: repository.root });
+    assert.equal(unpaired.status, 1);
+    assert.match(unpaired.stderr, /--prerelease and --dist-tag must be given together/);
+
+    const mixed = cli(["publish", "--resume", "--prerelease", "integration", "--dist-tag", "integration"], { cwd: repository.root });
+    assert.equal(mixed.status, 1);
+    assert.match(mixed.stderr, /--resume cannot be combined with prerelease/);
+
+    // Valid flags route into runPrerelease (refusing unresolvable --ref cleanly).
+    const badRef = cli(["publish", "--prerelease", "integration", "--dist-tag", "integration", "--ref", "nonexistent-ref"], { cwd: repository.root });
+    assert.equal(badRef.status, 1);
+    assert.match(badRef.stderr, /could not resolve nonexistent-ref to a full commit SHA/);
   } finally {
     repository.cleanup();
   }

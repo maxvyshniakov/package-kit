@@ -57,6 +57,14 @@ export function registryClient({ kind, token, fetch: fetcher = globalThis.fetch,
   const headers = token ? authHeaders(token, { Accept: "application/json" }) : { Accept: "application/json" };
   const tarballHeaders = token ? authHeaders(token) : {};
 
+  async function packument(name) {
+    const response = await fetcher(packageUrl(kind, name), { headers, cache: "no-store" });
+    if (response.status === 404) return { versions: {}, "dist-tags": {} };
+    if (!response.ok) throw new Error(`${packageUrl(kind, name)} lookup failed: ${response.status} ${response.statusText ?? ""}`.trim());
+    const body = await response.json();
+    return { versions: body.versions ?? {}, "dist-tags": body["dist-tags"] ?? {} };
+  }
+
   // GitHub Packages serves only whole packuments; npmjs.org serves one
   // version's manifest, which its CDN refreshes sooner than the packument.
   async function manifest(name, version) {
@@ -70,6 +78,7 @@ export function registryClient({ kind, token, fetch: fetcher = globalThis.fetch,
   return {
     kind,
     url: REGISTRY_URLS[kind],
+    packument,
     manifest,
 
     async hasVersion(name, version) {
@@ -91,6 +100,22 @@ export function registryClient({ kind, token, fetch: fetcher = globalThis.fetch,
       for (;;) {
         const found = await manifest(name, version).catch(() => null);
         if (found) return found;
+        const waited = now() - started;
+        if (waited >= timeoutMs) return null;
+        onWait({ waited, intervalMs });
+        await sleep(intervalMs);
+      }
+    },
+
+    /**
+     * Polls the packument until `ready(doc)` holds, or resolves to null after
+     * `timeoutMs`. Used when callers need both version metadata and dist-tags.
+     */
+    async waitForPackument(name, ready, { timeoutMs = 5 * 60_000, intervalMs = 10_000, onWait = () => {} } = {}) {
+      const started = now();
+      for (;;) {
+        const doc = await packument(name).catch(() => null);
+        if (doc && ready(doc)) return doc;
         const waited = now() - started;
         if (waited >= timeoutMs) return null;
         onWait({ waited, intervalMs });
