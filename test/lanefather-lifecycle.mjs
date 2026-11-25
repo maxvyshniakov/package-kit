@@ -11,13 +11,13 @@ import { syncHooks } from '../src/hooks.mjs';
 
 const archive = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-lifecycle-'));
 let repo, server;
-const run = (file, args, cwd, env) => new Promise((resolve, reject) => {
+const run = (file, args, cwd, env, { allowFail = false } = {}) => new Promise((resolve, reject) => {
   const child = spawn(file, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let text = '';
   child.stdout.on('data', data => { text += data; });
   child.stderr.on('data', data => { text += data; });
   child.on('error', reject);
-  child.on('close', status => status === 0 ? resolve(text) : reject(new Error(`${file} ${args.join(' ')}: ${status}\n${text}`)));
+  child.on('close', status => (status === 0 || allowFail) ? resolve({ status, text }) : reject(new Error(`${file} ${args.join(' ')}: ${status}\n${text}`)));
 });
 try {
   await run('bun', ['pm', 'pack', '--destination', archive], kitRoot, process.env);
@@ -42,7 +42,7 @@ try {
   repo.git('add', '.'); repo.git('commit', '-qm', 'fixture adapter configured');
   const integration = path.join(repo.root, '.claude/worktrees/integration');
   repo.git('worktree', 'add', '-b', 'integrate/fixture', integration, 'HEAD');
-  const output = await run('lanefather', ['start', 'fixture-adapter', '--ticket', 'none', '--base', 'integrate/fixture',
+  const { text: output } = await run('lanefather', ['start', 'fixture-adapter', '--ticket', 'none', '--base', 'integrate/fixture',
     '--claims', 'README.md', '--create'], repo.root, env);
   const state = path.join(archive, 'lanes');
   const recordFile = path.join(state, 'fixture-adapter.json');
@@ -67,8 +67,50 @@ try {
   assert.ok(post.results[0].report, 'a changed integration tree must actually rerun checks');
   assert.equal(fs.existsSync(record.worktree), false);
   assert.equal(finished.overrides.length, 0);
+
+  // Verify real Lanefather failure_evidence v1 classification:
+  // 1) Pre-existing failure on base with volatile path/timestamp/port/duration classifies as GREEN (`pre-existing`).
+  // 2) Different failure message on candidate stays RED (`unclassified`).
+  const baseFailScript = `console.error('Error at ' + process.cwd() + '/src/a.mjs:10 on http://127.0.0.1:' + (41000 + (process.pid % 1000)) + ' at ' + new Date().toISOString() + ' in 42ms'); console.error('AssertionError: pre-existing base mismatch'); process.exit(1)`;
+  fs.writeFileSync(
+    path.join(integration, 'package-kit.config.mjs'),
+    `export default {verify:{steps:[{name:'unit',command:['-e',${JSON.stringify(baseFailScript)}]}]}};`,
+  );
+  repo.git('-C', integration, 'add', 'package-kit.config.mjs');
+  repo.git('-C', integration, 'commit', '-qm', 'introduce pre-existing base failure');
+
+  await run('lanefather', ['start', 'pre-existing-lane', '--ticket', 'none', '--base', 'integrate/fixture',
+    '--claims', 'README.md', '--create'], repo.root, env);
+  const preRecord = JSON.parse(fs.readFileSync(path.join(state, 'pre-existing-lane.json'), 'utf8'));
+  fs.writeFileSync(path.join(preRecord.worktree, 'README.md'), 'unrelated edit on failing base\n');
+  repo.git('-C', preRecord.worktree, 'add', 'README.md');
+  repo.git('-C', preRecord.worktree, 'commit', '-qm', 'unrelated edit');
+  await run('lanefather', ['check', 'pre-existing-lane', '--slots', '1'], preRecord.worktree, env);
+  const preReceipt = JSON.parse(fs.readFileSync(path.join(state, 'pre-existing-lane.receipt.json'), 'utf8'));
+  assert.equal(preReceipt.status, 'green', `expected pre-existing failure to classify green: ${JSON.stringify(preReceipt)}`);
+  assert.equal(preReceipt.raw_status, 'red');
+  assert.equal(preReceipt.classification.checks[0].class, 'pre-existing');
+  assert.equal(preReceipt.classification.checks[0].failure_comparison.version, 1);
+
+  await run('lanefather', ['start', 'different-failure-lane', '--ticket', 'none', '--base', 'integrate/fixture',
+    '--claims', 'package-kit.config.mjs', '--create'], repo.root, env);
+  const diffRecord = JSON.parse(fs.readFileSync(path.join(state, 'different-failure-lane.json'), 'utf8'));
+  fs.writeFileSync(
+    path.join(diffRecord.worktree, 'package-kit.config.mjs'),
+    `export default {verify:{steps:[{name:'unit',command:['-e',"console.error('AssertionError: brand new candidate failure'); process.exit(1)"]}]}};`,
+  );
+  repo.git('-C', diffRecord.worktree, 'add', 'package-kit.config.mjs');
+  repo.git('-C', diffRecord.worktree, 'commit', '-qm', 'different candidate failure');
+  const diffRun = await run('lanefather', ['check', 'different-failure-lane', '--slots', '1'], diffRecord.worktree, env, { allowFail: true });
+  assert.notEqual(diffRun.status, 0, 'different candidate failure must fail lanefather check');
+  const diffReceipt = JSON.parse(fs.readFileSync(path.join(state, 'different-failure-lane.receipt.json'), 'utf8'));
+  assert.equal(diffReceipt.status, 'red');
+  assert.equal(diffReceipt.classification.checks[0].class, 'unclassified');
+
   console.log(JSON.stringify({ registration: 'real private Store', checks: receipt.check_results,
     post_merge: finished.post_merge.status, post_merge_reran_after_integration_change: true, review: 'actual documentation-only exemption',
+    pre_existing_classification: preReceipt.classification.checks[0].class,
+    different_failure_classification: diffReceipt.classification.checks[0].class,
     status: finished.status, force_used: false }, null, 2));
 } finally {
   if (repo) repo.cleanup();

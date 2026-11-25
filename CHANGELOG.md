@@ -4,6 +4,10 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+### Added
+
+- `package-kit-lane` emits strictly-typed `failure_evidence` v1 (`{ version: 1, comparable, context, cases }`) on failed check rows so `lanefather check` can classify pre-existing base failures across worktrees while keeping timed-out, interrupted, environment-failed, and empty-log failures non-comparable.
+
 ### Fixed
 
 - `check-changelogs` fails a release section (`## Unreleased` or `## x.y.z`) that holds the same `### <Heading>` twice, as a `merge=union` merge of two branches that each added `### Added` leaves it, naming the section, the heading and both lines.

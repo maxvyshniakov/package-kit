@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { legacyEnvironmentWarnings, loadConfig } from './config.mjs';
+import { buildFailureEvidence } from './failure-evidence.mjs';
 import { cleanEnvironment, gitRunner } from './git.mjs';
 import { runVerify, verifySteps } from './verify.mjs';
 import { capacity, hasLease, leaseSelf, verifyLeaseSlots } from './slotfather.mjs';
@@ -156,11 +157,30 @@ export async function main(args) {
     checks: steps.map(step => {
       const row = byName.get(step.name);
       const blockedBy = row ? [] : [...step.needs, ...(step.after ?? [])].filter(id => byName.get(id)?.status !== 'ok');
-      return { id: step.name, suite: byId.get(step.name).suite,
-        status: environment ? 'void' : row ? { ok: 'passed', fail: 'failed', stopped: 'cancelled' }[row.status] : (!result.interrupted && blockedBy.length ? 'blocked' : 'cancelled'),
-        seconds: row?.seconds ?? 0, timed_out: Boolean(row?.timedOut), ...(row?.reused ? { reused: true } : {}),
-        log: logs.get(step.name),
+      const status = environment ? 'void' : row ? { ok: 'passed', fail: 'failed', stopped: 'cancelled' }[row.status] : (!result.interrupted && blockedBy.length ? 'blocked' : 'cancelled');
+      const log = logs.get(step.name);
+      const timedOut = Boolean(row?.timedOut);
+      return {
+        id: step.name,
+        suite: byId.get(step.name).suite,
+        status,
+        seconds: row?.seconds ?? 0,
+        timed_out: timedOut,
+        ...(row?.reused ? { reused: true } : {}),
+        log,
         blocked_by: blockedBy,
+        ...(status === 'failed'
+          ? {
+              failure_evidence: buildFailureEvidence({
+                checkId: step.name,
+                logText: fs.readFileSync(log, 'utf8'),
+                root: config.root,
+                timedOut,
+                interrupted: Boolean(result.interrupted),
+                environmentFailed: Boolean(environment),
+              }),
+            }
+          : {}),
       };
     }),
   };
