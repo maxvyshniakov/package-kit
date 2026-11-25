@@ -397,6 +397,8 @@ function assertStrictEvidenceV1(evidence, { expectComparable = true } = {}) {
       assert.equal(seenIds.has(item.id), false, `duplicate case id: ${item.id}`);
       seenIds.add(item.id);
     }
+  } else {
+    assert.deepEqual(evidence.cases, [], 'non-comparable evidence must have empty cases');
   }
 }
 
@@ -581,4 +583,154 @@ test('failure_evidence extracts structured cases for Vitest, node:test, package-
   assertStrictEvidenceV1(evChecksBase, { expectComparable: true });
   assert.deepEqual(evChecksCand.cases.map(c => c.id), ['check-has-selectors']);
   assert.deepEqual(evChecksBase.cases.map(c => c.id), ['check-token-preview-scroll']);
+});
+
+test('failure_evidence captures residual non-test errors, middle-of-201-line diffs, and oversized log caps', async () => {
+  const { buildFailureEvidence, buildFailureEvidenceFromFile } = await import('../src/failure-evidence.mjs');
+
+  // (a) Candidate keeping base Vitest failure + adding an unattributed coverage/unhandled error MUST NOT match base.
+  const baseVitest = [
+    'FAIL  packages/ui/button.test.ts > Button > renders label (12ms)',
+    'AssertionError: expected "Cancel" to be "Save"',
+    'Test Files  1 failed (1)',
+    'Tests  1 failed (1)',
+  ].join('\n');
+  const candidatePlusResidual = [
+    baseVitest,
+    'ERROR: Coverage for lines (72%) does not meet global threshold (80%)',
+  ].join('\n');
+  const evBase = buildFailureEvidence({ checkId: 'verify:unit', logText: baseVitest, root: '/tmp/a' });
+  const evCand = buildFailureEvidence({ checkId: 'verify:unit', logText: candidatePlusResidual, root: '/tmp/b' });
+  assertStrictEvidenceV1(evBase, { expectComparable: true });
+  assertStrictEvidenceV1(evCand, { expectComparable: true });
+  assert.deepEqual(evBase.cases.map(c => c.id), ['packages/ui/button.test.ts > Button > renders label']);
+  assert.deepEqual(evCand.cases.map(c => c.id), [
+    'packages/ui/button.test.ts > Button > renders label',
+    'verify:unit#residual',
+  ]);
+
+  // (a2) package-kit checks wrapper with Vitest FAIL inside one sub-check + a second failing sub-check extracts both.
+  const nestedChecks = [
+    '== unit: vitest run',
+    'FAIL  src/a.test.ts > suite > test a',
+    'AssertionError: boom',
+    '== lint: oxlint',
+    'Error: unused variable x',
+    'checks:',
+    '  FAIL unit (exit 1, 1.4s)',
+    '  FAIL lint (exit 1, 0.3s)',
+  ].join('\n');
+  const evNested = buildFailureEvidence({ checkId: 'verify:all', logText: nestedChecks, root: '/tmp/a' });
+  assertStrictEvidenceV1(evNested, { expectComparable: true });
+  assert.deepEqual(evNested.cases.map(c => c.id), ['unit', 'lint']);
+
+  // (a3) Runner summary count exceeding extracted cases returns comparable: false.
+  const incompleteLog = [
+    'FAIL  src/a.test.ts > suite > test a',
+    'AssertionError: boom',
+    'Tests  3 failed (3)',
+  ].join('\n');
+  const evIncomplete = buildFailureEvidence({ checkId: 'verify:unit', logText: incompleteLog, root: '/tmp/a' });
+  assertStrictEvidenceV1(evIncomplete, { expectComparable: false });
+
+  // (b) Middle-of-201-line diff MUST diverge in signature (no middle truncation).
+  const make201 = middle => Array.from({ length: 201 }, (_, i) => (i === 100 ? middle : `line-${i}: steady output`)).join('\n');
+  const evMidA = buildFailureEvidence({ checkId: 'verify:script', logText: make201('Error: middle failure A'), root: '/tmp/a' });
+  const evMidB = buildFailureEvidence({ checkId: 'verify:script', logText: make201('Error: middle failure B'), root: '/tmp/b' });
+  assertStrictEvidenceV1(evMidA, { expectComparable: true });
+  assertStrictEvidenceV1(evMidB, { expectComparable: true });
+  assert.notEqual(evMidA.cases[0].signature, evMidB.cases[0].signature);
+
+  // Oversized log file (> maxBytes) returns comparable: false without failing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'package-kit-ev-cap-'));
+  try {
+    const bigLog = path.join(dir, 'big.log');
+    fs.writeFileSync(bigLog, 'Error: huge\n'.repeat(200));
+    const evTooBig = buildFailureEvidenceFromFile({
+      checkId: 'verify:big',
+      logPath: bigLog,
+      root: dir,
+      maxBytes: 128,
+    });
+    assertStrictEvidenceV1(evTooBig, { expectComparable: false });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('failure_evidence normalizes tmpdir subpaths, repo boundaries, sid-kit shards, passing boundaries, and signals', async () => {
+  const { buildFailureEvidence, normalizeLogLine } = await import('../src/failure-evidence.mjs');
+
+  // (c) os.tmpdir() random subpath normalization + <REPO> path boundary + .git/worktrees normalization.
+  const tmpDir = os.tmpdir();
+  const normTmpA = normalizeLogLine(`Error: connect ${path.join(tmpDir, 'org.chromium.qNlzdF/SingletonSocket')}`, { root: '/work/repo' });
+  const normTmpB = normalizeLogLine(`Error: connect ${path.join(tmpDir, 'org.chromium.xYz123/SingletonSocket')}`, { root: '/work/repo' });
+  assert.equal(normTmpA, normTmpB);
+  assert.equal(normTmpA, 'Error: connect <TMP>/SingletonSocket');
+
+  const normBoundary = normalizeLogLine('Error in /work/repo/src/a.ts and /work/repo-other/src/b.ts', { root: '/work/repo' });
+  assert.equal(normBoundary, 'Error in <REPO>/src/a.ts and /work/repo-other/src/b.ts');
+
+  const normGitWt = normalizeLogLine('at /home/dev/proj/.git/worktrees/wt-1/src/a.ts:5', { root: '/other/root' });
+  assert.equal(normGitWt, 'at <REPO>/src/a.ts:5');
+
+  // (d) sid-kit browser-check shard extraction + --session and load normalization.
+  const shardLogA = [
+    'PASS check-buttons.mjs (1.1s)',
+    'FAIL check-scroll.mjs (2.4s)',
+    '  agent-browser --session scroll-48291 failed (load 3.45 2.10 1.88)',
+    '  Error: scroll offset 12 !== 0',
+    'EXPECTED FAIL check-known.mjs (0.5s)',
+    '  known flaky note',
+    '2/3 checks as expected',
+  ].join('\n');
+  const shardLogB = [
+    'PASS check-buttons.mjs (0.9s)',
+    'FAIL check-scroll.mjs (4.8s)',
+    '  agent-browser --session scroll-99104 failed (load 7.12 5.01 4.33)',
+    '  Error: scroll offset 12 !== 0',
+    'EXPECTED FAIL check-known.mjs (0.8s)',
+    '  known flaky note',
+    '2/3 checks as expected',
+  ].join('\n');
+  const evShardA = buildFailureEvidence({ checkId: 'browser:browser%20checks%201%2F3', logText: shardLogA, root: '/tmp/a' });
+  const evShardB = buildFailureEvidence({ checkId: 'browser:browser%20checks%201%2F3', logText: shardLogB, root: '/tmp/b' });
+  assertStrictEvidenceV1(evShardA, { expectComparable: true });
+  assert.deepEqual(evShardA, evShardB);
+  assert.deepEqual(evShardA.cases.map(c => c.id), ['check-scroll.mjs']);
+
+  // Passing-test boundaries do not pollute a failing test's signature; Playwright numbered blocks are extracted.
+  const pwLogA = [
+    '  ✓ 1 [chromium] › a.spec.ts:1:1 › passes (10ms)',
+    '  1) [chromium] › b.spec.ts:10:5 › fails cleanly',
+    '     Error: expect(received).toBe(expected)',
+    '  ✓ 2 [chromium] › c.spec.ts:1:1 › other passing test A (11ms)',
+  ].join('\n');
+  const pwLogB = [
+    '  ✓ 1 [chromium] › a.spec.ts:1:1 › passes (15ms)',
+    '  1) [chromium] › b.spec.ts:10:5 › fails cleanly',
+    '     Error: expect(received).toBe(expected)',
+    '  ✓ 2 [chromium] › c.spec.ts:1:1 › totally different passing test B (19ms)',
+  ].join('\n');
+  const evPwA = buildFailureEvidence({ checkId: 'browser:e2e', logText: pwLogA, root: '/tmp/a' });
+  const evPwB = buildFailureEvidence({ checkId: 'browser:e2e', logText: pwLogB, root: '/tmp/b' });
+  assertStrictEvidenceV1(evPwA, { expectComparable: true });
+  assert.deepEqual(evPwA, evPwB);
+  assert.deepEqual(evPwA.cases.map(c => c.id), ['[chromium] › b.spec.ts:10:5 › fails cleanly']);
+
+  // (e) Signal-killed step (e.g. SIGKILL / OOM) emits comparable: false end-to-end.
+  const repo = tempRepository({
+    'package.json': { name: 'sigkill-fixture', type: 'module' },
+    'package-kit.config.mjs': `export default {verify:{steps:[{name:'oom',command:['-e',"console.error('about to die'); process.kill(process.pid, 'SIGKILL')"]}]}};`,
+  }, { git: true });
+  try {
+    const result = spawnSync(process.execPath, [adapter, '--jobs', '1'],
+      { cwd: repo.root, env: repo.env, encoding: 'utf8', timeout: 15000 });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    const report = JSON.parse(fs.readFileSync(/^Verification report: (.+)$/m.exec(result.stdout)[1], 'utf8'));
+    assert.equal(report.checks[0].status, 'failed');
+    assertStrictEvidenceV1(report.checks[0].failure_evidence, { expectComparable: false });
+  } finally {
+    repo.cleanup();
+  }
 });

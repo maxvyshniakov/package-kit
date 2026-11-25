@@ -475,7 +475,8 @@ work. Projects sharing batch-gate evidence with a hook must provide that explici
 from the consumer's existing `verify.steps` and optional `verify.browser`. It selects all declared checks for each
 change. Check IDs are the suite (`verify` or `browser`), a colon and the URL-encoded step name. Requested checks
 include their dependencies; when both suites run, browser work waits for normal verification. Names and commands
-come entirely from `package-kit.config.mjs`.
+come entirely from `package-kit.config.mjs`. Failed check rows carry strictly-typed `failure_evidence` v1 (`version`,
+`comparable`, `context`, `cases`) so `lanefather check` can classify pre-existing base failures across worktrees.
 
 A parallel-work consumer tracks `.lanefather.toml` with its own project facts and:
 

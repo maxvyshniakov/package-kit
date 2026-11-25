@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { legacyEnvironmentWarnings, loadConfig } from './config.mjs';
-import { buildFailureEvidence } from './failure-evidence.mjs';
+import { buildFailureEvidenceFromFile } from './failure-evidence.mjs';
 import { cleanEnvironment, gitRunner } from './git.mjs';
 import { runVerify, verifySteps } from './verify.mjs';
 import { capacity, hasLease, leaseSelf, verifyLeaseSlots } from './slotfather.mjs';
@@ -171,13 +171,13 @@ export async function main(args) {
         blocked_by: blockedBy,
         ...(status === 'failed'
           ? {
-              failure_evidence: buildFailureEvidence({
+              failure_evidence: buildFailureEvidenceFromFile({
                 checkId: step.name,
-                logText: fs.readFileSync(log, 'utf8'),
+                logPath: log,
                 root: config.root,
                 timedOut,
                 interrupted: Boolean(result.interrupted),
-                environmentFailed: Boolean(environment),
+                signal: row?.signal ?? null,
               }),
             }
           : {}),

@@ -108,7 +108,10 @@ export function startProcess(step, { root, running, mark, processes = () => [], 
       finish(false);
     });
     // A stopped command may handle SIGTERM and exit zero without finishing its work.
-    child.on("close", code => finish(code === 0 && !handle.timedOut && !handle.stopped));
+    child.on("close", (code, signal) => {
+      if (signal) handle.signal = signal;
+      finish(code === 0 && !handle.timedOut && !handle.stopped);
+    });
   });
   running.add(handle);
   return handle;

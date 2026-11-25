@@ -107,10 +107,36 @@ try {
   assert.equal(diffReceipt.status, 'red');
   assert.equal(diffReceipt.classification.checks[0].class, 'unclassified');
 
+  // 3) Candidate keeping the exact pre-existing base failure AND adding an extra failing case must stay RED (`unclassified`).
+  const basePlusExtraScript = `console.error('FAIL  src/base.test.ts > suite > pre-existing'); console.error('AssertionError: pre-existing base mismatch'); console.error('FAIL  src/new.test.ts > suite > candidate regression'); console.error('AssertionError: new candidate error'); process.exit(1)`;
+  const structuredBaseScript = `console.error('FAIL  src/base.test.ts > suite > pre-existing'); console.error('AssertionError: pre-existing base mismatch'); process.exit(1)`;
+  fs.writeFileSync(
+    path.join(integration, 'package-kit.config.mjs'),
+    `export default {verify:{steps:[{name:'unit',command:['-e',${JSON.stringify(structuredBaseScript)}]}]}};`,
+  );
+  repo.git('-C', integration, 'add', 'package-kit.config.mjs');
+  repo.git('-C', integration, 'commit', '-qm', 'structured pre-existing base failure');
+
+  await run('lanefather', ['start', 'base-plus-extra-lane', '--ticket', 'none', '--base', 'integrate/fixture',
+    '--claims', 'package-kit.config.mjs', '--after', 'different-failure-lane', '--create'], repo.root, env);
+  const extraRecord = JSON.parse(fs.readFileSync(path.join(state, 'base-plus-extra-lane.json'), 'utf8'));
+  fs.writeFileSync(
+    path.join(extraRecord.worktree, 'package-kit.config.mjs'),
+    `export default {verify:{steps:[{name:'unit',command:['-e',${JSON.stringify(basePlusExtraScript)}]}]}};`,
+  );
+  repo.git('-C', extraRecord.worktree, 'add', 'package-kit.config.mjs');
+  repo.git('-C', extraRecord.worktree, 'commit', '-qm', 'keep base failure and add candidate regression');
+  const extraRun = await run('lanefather', ['check', 'base-plus-extra-lane', '--slots', '1'], extraRecord.worktree, env, { allowFail: true });
+  assert.notEqual(extraRun.status, 0, 'candidate keeping base failure plus extra failure must fail lanefather check');
+  const extraReceipt = JSON.parse(fs.readFileSync(path.join(state, 'base-plus-extra-lane.receipt.json'), 'utf8'));
+  assert.equal(extraReceipt.status, 'red');
+  assert.equal(extraReceipt.classification.checks[0].class, 'unclassified');
+
   console.log(JSON.stringify({ registration: 'real private Store', checks: receipt.check_results,
     post_merge: finished.post_merge.status, post_merge_reran_after_integration_change: true, review: 'actual documentation-only exemption',
     pre_existing_classification: preReceipt.classification.checks[0].class,
     different_failure_classification: diffReceipt.classification.checks[0].class,
+    base_plus_extra_classification: extraReceipt.classification.checks[0].class,
     status: finished.status, force_used: false }, null, 2));
 } finally {
   if (repo) repo.cleanup();

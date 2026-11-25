@@ -230,7 +230,13 @@ async function runStepGroup(steps, start, {
           held -= needed;
           heldSlots -= taken;
           const status = passed ? "ok" : handle.stopped ? "stopped" : "fail";
-          results.set(step.name, { name: step.name, status, seconds: (now() - started) / 1000, ...(handle.timedOut ? { timedOut: true } : {}) });
+          results.set(step.name, {
+            name: step.name,
+            status,
+            seconds: (now() - started) / 1000,
+            ...(handle.timedOut ? { timedOut: true } : {}),
+            ...(handle.signal ? { signal: handle.signal } : {}),
+          });
           if (status === "fail" && !halted && !keepGoing) halt("SIGTERM");
           launch();
         });

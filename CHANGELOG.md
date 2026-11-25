@@ -6,7 +6,7 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ### Added
 
-- `package-kit-lane` emits strictly-typed `failure_evidence` v1 (`{ version: 1, comparable, context, cases }`) on failed check rows so `lanefather check` can classify pre-existing base failures across worktrees while keeping timed-out, interrupted, environment-failed, and empty-log failures non-comparable.
+- `package-kit-lane` emits strictly-typed `failure_evidence` v1 (`{ version: 1, comparable, context, cases }`) on `failed` check rows so `lanefather check` can classify pre-existing base failures across worktrees, emitting `comparable: false` for timed-out, signal-killed, interrupted, oversized-log, incomplete, or empty-log failures and omitting `failure_evidence` on non-`failed` rows.
 
 ### Fixed
 
