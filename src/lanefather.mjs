@@ -154,6 +154,7 @@ export async function main(args) {
   const byName = new Map(result.results.map(row => [row.name, row]));
   const report = { v: 1, head, tree, exit: environment ? 1 : result.exit, environment,
     interrupted: result.interrupted,
+    capabilities: ['base'],
     checks: steps.map(step => {
       const row = byName.get(step.name);
       const blockedBy = row ? [] : [...step.needs, ...(step.after ?? [])].filter(id => byName.get(id)?.status !== 'ok');

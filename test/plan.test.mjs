@@ -81,6 +81,7 @@ test("planChecks preserves backward compatibility when no path scopes are declar
   assert.deepEqual(plan.unowned, []);
   assert.deepEqual(plan.suites, ["verify"]);
   assert.deepEqual(plan.checks.map(row => row.id), ["verify:lint", "verify:test"]);
+  assert.deepEqual(plan.capabilities, ["base"]);
 });
 
 test("planChecks selects only affected checks, transitive producers, and always-run checks", () => {
@@ -99,6 +100,7 @@ test("planChecks selects only affected checks, transitive producers, and always-
   const storyPlan = planChecks({ checks, paths: ["packages/b/stories/Card.stories.tsx"], inert: ["**/*.md"] });
   assert.equal(storyPlan.full, false);
   assert.deepEqual(storyPlan.unowned, []);
+  assert.deepEqual(storyPlan.capabilities, ["base"]);
   assert.deepEqual(storyPlan.checks.map(row => [row.id, row.producer]), [
     ["verify:hygiene", false],
     ["verify:pkg-b", false],
@@ -125,6 +127,7 @@ test("planChecks selects only affected checks, transitive producers, and always-
   assert.equal(emptyPlan.full, false);
   assert.deepEqual(emptyPlan.checks, []);
   assert.deepEqual(emptyPlan.suites, []);
+  assert.deepEqual(emptyPlan.capabilities, ["base"]);
 });
 
 test("planChecks falls back to full when an unowned path changes, and supports runner + canary", () => {
@@ -169,6 +172,7 @@ test("planSmoke supports function, array, step.smoke tag, and default diff fallb
 
   // step.smoke: true selects tagged steps + their producers.
   const tagged = planSmoke({ verify: {} }, { checks, paths: basePlan.paths, plan: basePlan });
+  assert.deepEqual(tagged.capabilities, ["base"]);
   assert.deepEqual(tagged.checks.map(r => [r.id, r.producer]), [
     ["browser:build", true],
     ["browser:row-dom", false],
@@ -511,6 +515,7 @@ test("package-kit-lane returns scoped plans, unowned fallback, and narrow --smok
     const scopedPlan = JSON.parse(scoped.stdout);
     assert.equal(scopedPlan.full, false);
     assert.deepEqual(scopedPlan.unowned, []);
+    assert.deepEqual(scopedPlan.capabilities, ["base"]);
     assert.deepEqual(scopedPlan.checks.map(r => [r.id, r.producer]), [
       ["verify:hygiene", false],
       ["verify:pkg-b", false],
@@ -527,6 +532,7 @@ test("package-kit-lane returns scoped plans, unowned fallback, and narrow --smok
     assert.equal(smoke.status, 0, smoke.stderr);
     const smokePlan = JSON.parse(smoke.stdout);
     assert.equal(smokePlan.full, false);
+    assert.deepEqual(smokePlan.capabilities, ["base"]);
     assert.deepEqual(smokePlan.checks.map(r => [r.id, r.producer]), [
       ["verify:hygiene", false],
       ["browser:build", true],

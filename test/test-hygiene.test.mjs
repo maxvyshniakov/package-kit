@@ -91,6 +91,33 @@ test("UI assertions: class names and CSS text, not roles, data attributes or sta
   assert.deepEqual(uiFindings("tests/test_a.py", "assert 'color: red;' in css\n"), [], "JavaScript tests only");
 });
 
+test("UI assertions catch getAttribute('class') and .matches('.<class>') without flagging ARIA/data selectors", () => {
+  const text = [
+    'expect(node.getAttribute("class")).toContain("rounded");',
+    "expect(node.getAttribute('class')).toMatch(/active/);",
+    "expect(node.getAttribute(`class`)).toBe('primary');",
+    'assert.ok(node?.getAttribute("class")?.includes("open"));',
+    'expect(node.matches(".foo")).toBe(true);',
+    "expect(node.matches('.btn-primary')).toBe(true);",
+    'assert.ok(node.matches("button.is-active"));',
+    "assert.equal(node.matches('[role=\"button\"].is-open'), true);",
+    'expect(node.getAttribute("aria-label")).toBe("Close");',
+    "expect(node.getAttribute('data-state')).toBe('open');",
+    'expect(node.getAttribute("data-class")).toBe("x");',
+    'expect(node.matches("[role=\'button\']")).toBe(true);',
+    'expect(node.matches("[data-state=\'open\']")).toBe(true);',
+    'expect(node.matches("[data-url=\'example.com\']")).toBe(true);',
+    'expect(node.matches(":focus-visible")).toBe(true);',
+    '// expect(node.getAttribute("class")).toContain("foo");',
+    'expect(node.matches("[role=\'button\']")).toBe(true); // not .matches(".foo")',
+    'expect(msg).toContain(\'node.getAttribute("class")\');',
+    'expect(msg).toContain(\'node.matches(".foo")\');',
+    'const cls = node.getAttribute("class");',
+    'const isCard = node.matches(".card");',
+  ].join("\n");
+  assert.deepEqual(lines(uiFindings("src/__tests__/evasion.test.tsx", text)), [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
 test("globs: ** spans directories, * one segment, braces alternatives", () => {
   assert.ok(globRegExp("**/*.test.{ts,tsx}").test("a.test.ts"));
   assert.ok(globRegExp("**/*.test.{ts,tsx}").test("packages/x/src/a.test.tsx"));

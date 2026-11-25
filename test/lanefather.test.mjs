@@ -28,6 +28,7 @@ test('the adapter plans arbitrary configured checks without executing them', () 
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.v, 1);
     assert.equal(plan.full, true);
+    assert.deepEqual(plan.capabilities, ['base']);
     assert.deepEqual(plan.paths, ['input.txt']);
     assert.deepEqual(plan.suites, ['verify', 'browser']);
     assert.deepEqual(plan.checks.map(({ id, suite }) => [id, suite]), [
@@ -55,6 +56,7 @@ test('selected checks run their real dependencies and report failure and blocked
     assert.ok(reportPath, result.stdout + result.stderr);
     const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
     assert.equal(report.v, 1);
+    assert.deepEqual(report.capabilities, ['base']);
     assert.equal(report.head, repo.git('rev-parse', 'HEAD'));
     assert.equal(report.tree, repo.git('rev-parse', 'HEAD^{tree}'));
     assert.deepEqual(report.checks.map(({ id, status }) => [id, status]), [
@@ -80,6 +82,7 @@ test('a full run keeps browser work after validation and reports a committed tre
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const report = JSON.parse(fs.readFileSync(/^Verification report: (.+)$/m.exec(result.stdout)[1], 'utf8'));
     assert.equal(report.environment, null);
+    assert.deepEqual(report.capabilities, ['base']);
     assert.deepEqual(report.checks.map(({ id, status }) => [id, status]),
       [['verify:build', 'passed'], ['browser:build', 'passed']]);
   } finally { repo.cleanup(); }

@@ -253,7 +253,7 @@ export default {
 |---|---|---|
 | `fixed-sleep` | `waitForTimeout(...)` and Python's `wait_for_timeout(...)` whatever the argument; a `new Promise(resolve => setTimeout(resolve, <n or NAME>))`, `sleep(<n>)`, `delay(<n>)` and `Bun.sleep(<n>)` of 50 ms or more; Python `time.sleep(<n>)`/`asyncio.sleep(<n>)` of 0.2 s or more; `Thread.sleep`, `Task.sleep`, a bare `sleep`/`usleep`, `runMain(for:)`, `thread::sleep` | a `sleep-ok: <reason>` comment on the line or right above it |
 | `timing-assert` | an assertion bounding a measured duration from above: `assert.ok(Date.now() - started < 2000)`, `expect(elapsed).toBeLessThan(100)` (or chai's `below`, `lessThan`, `most`), `self.assertLess(elapsed, 0.2)` (ported from Straylight's `tools/perf-budget-check.py`; also Swift and Rust) | a budget through `perfBudget` / `perf_budget`; a deadline with a literal bound of at least 30 s, or a tighter one with a `load-tolerant: <why>` comment |
-| `ui-assertion` (opt-in) | `toHaveClass(...)`, an asserted `.className` or `classList`, a string holding a CSS declaration (`"color: var(--x);"`) in an assertion | roles, states and data attributes |
+| `ui-assertion` (opt-in) | `toHaveClass(...)`, an asserted `.className`, `classList`, `getAttribute("class")`, or `.matches(".<class>")`, a string holding a CSS declaration (`"color: var(--x);"`) in an assertion | roles, states and data attributes (including `.matches("[role='button']")` and `.matches("[data-state='open']")`) |
 
 Only the helper exempts an assertion, in the perf suite as anywhere. Each file calling it must match `perfSuite`, or its
 budgets never hold: that fails outright. The perf suite is the repository's own command: it runs those files alone,
@@ -475,7 +475,8 @@ work. Projects sharing batch-gate evidence with a hook must provide that explici
 from the consumer's existing `verify.steps` and optional `verify.browser`. It selects all declared checks for each
 change. Check IDs are the suite (`verify` or `browser`), a colon and the URL-encoded step name. Requested checks
 include their dependencies; when both suites run, browser work waits for normal verification. Names and commands
-come entirely from `package-kit.config.mjs`. Failed check rows carry strictly-typed `failure_evidence` v1 (`version`,
+come entirely from `package-kit.config.mjs`. Plans and reports advertise `capabilities: ["base"]` so Lanefather passes
+`--base <ref>` on scoped lane check runs and their solo reruns. Failed check rows carry strictly-typed `failure_evidence` v1 (`version`,
 `comparable`, `context`, `cases`) so `lanefather check` can classify pre-existing base failures across worktrees.
 
 A parallel-work consumer tracks `.lanefather.toml` with its own project facts and:

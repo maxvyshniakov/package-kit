@@ -85,7 +85,7 @@ function collectWithProducers(ids, byId, needIds) {
  * Each entry in `checks` is `{ id, suite, step }` where `step` is a normalized
  * verify step (`name`, `needs`, optional `inputs`, `always`, `cheap`, `smoke`,
  * `scopeArgs`). Returns the Lanefather plan contract:
- * `{ v: 1, full, paths, unowned, suites, reasons, checks: [{ id, suite, paths, producer }] }`.
+ * `{ v: 1, full, paths, unowned, suites, reasons, checks: [{ id, suite, paths, producer }], capabilities: ["base"] }`.
  */
 export function planChecks({ checks, paths = [], inert = [], runner = [], canary = [], forceFull = false }) {
   const normalizedPaths = [...new Set(paths.map(normalizePath).filter(Boolean))].sort();
@@ -100,6 +100,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
       suites: allSuites,
       reasons: Object.fromEntries(allSuites.map(suite => [suite, ["All configured steps are checked."]])),
       checks: checks.map(({ id, suite }) => ({ id, suite, paths: normalizedPaths, producer: false })),
+      capabilities: ["base"],
     };
   }
 
@@ -134,6 +135,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
       suites: [],
       reasons: {},
       checks: [],
+      capabilities: ["base"],
     };
   }
 
@@ -207,6 +209,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
     suites,
     reasons,
     checks: rows,
+    capabilities: ["base"],
   };
 }
 
@@ -282,6 +285,7 @@ export function planSmoke(config, { checks, paths = [], plan }) {
     suites,
     reasons,
     checks: rows,
+    capabilities: plan.capabilities ?? ["base"],
   };
 }
 

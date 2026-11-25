@@ -12,8 +12,9 @@
 //                  30 s, or with a `load-tolerant: <why>` comment. Each file calling the helper
 //                  must be part of the perf suite (testHygiene.perfSuite), or its budgets never hold.
 //   ui-assertion   (opt-in, testHygiene.ui) a class-name or CSS-text assertion in a unit test:
-//                  toHaveClass(...), an asserted .className or classList, a string holding a
-//                  CSS declaration (`"color: var(--x);"`) inside an assertion.
+//                  toHaveClass(...), an asserted .className, classList, getAttribute("class"),
+//                  or .matches(".<class>"), or a string holding a CSS declaration
+//                  (`"color: var(--x);"`) inside an assertion.
 //
 // Today's findings go into a baseline file, per rule and file. A file may not
 // gain findings, a new file may not have any, and a count that dropped must be
@@ -268,17 +269,51 @@ export function callsPerfHelper(file, text) {
 // ---- ui-assertion ----------------------------------------------------------
 
 const CLASS_ASSERTION = /\btoHaveClass\s*\(|\b(?:expect|assert(?:\.\w+)?)\s*\(.*?\.(?:className|classList)\b|\.classList\.contains\s*\([^)]*\)\s*\)?\s*\.(?:toBe|toEqual)|\bassert\w*\s*\([^)]*\.classList\.contains\(/;
+const GET_CLASS_ATTR = /\.getAttribute\s*\(\s*(["'`])class\1\s*\)/;
+const MATCHES_CALL = /\.matches\s*\(\s*(["'`])((?:\\.|(?!\1).)*)\1\s*\)/g;
 // A declaration whose value looks like CSS (a var(), a number or unit, a colour, a keyword), not prose such as
 // "warning: deprecated; use x".
 const CSS_TEXT = /(["'`])(?:[^"'`]*?[\s{;])?(?:--)?[a-z]+(?:-[a-z0-9]+)*\s*:\s*(?=[^;"'`]*(?:var\(|\d|#[0-9a-f]{3}|\b(?:none|auto|inherit|initial|transparent|currentColor|solid|flex|grid|block|inline|hidden|absolute|relative|fixed|bold|normal)\b))[^;"'`]+;[^"'`]*\1/i;
 const ASSERTING = /\b(?:expect|assert(?:\.\w+)?)\s*\(|\.to(?:Contain|Match|Be|Equal|Include)\w*\s*\(/;
+
+/** The line without its trailing // comment, keeping string literal contents intact. */
+function withoutJsComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === "\\") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (line.startsWith("//", i)) return line.slice(0, i);
+    if (c === '"' || c === "'" || c === "`") quote = c;
+  }
+  return line;
+}
+
+function hasClassSelectorMatch(raw) {
+  for (const [, , selector] of raw.matchAll(MATCHES_CALL)) {
+    if (/\.[A-Za-z_-]/.test(selector.replace(/\[[^\]]*\]/g, ""))) return true;
+  }
+  return false;
+}
+
+function isClassAssertion(line, stripped) {
+  if (CLASS_ASSERTION.test(stripped)) return true;
+  if (!ASSERTING.test(stripped)) return false;
+  const uncommented = withoutJsComment(line);
+  if (/\.getAttribute\s*\(/.test(stripped) && GET_CLASS_ATTR.test(uncommented)) return true;
+  if (/\.matches\s*\(/.test(stripped) && hasClassSelectorMatch(uncommented)) return true;
+  return false;
+}
 
 export function uiFindings(file, text) {
   if (languageOf(file) !== "js") return [];
   const found = [];
   text.split("\n").forEach((line, index) => {
     const stripped = code(line, "js");
-    if (CLASS_ASSERTION.test(stripped)) found.push({ line: index + 1, text: `class-name assertion: ${line.trim()}` });
+    if (isClassAssertion(line, stripped)) found.push({ line: index + 1, text: `class-name assertion: ${line.trim()}` });
     else if (ASSERTING.test(stripped) && CSS_TEXT.test(line)) found.push({ line: index + 1, text: `CSS-text assertion: ${line.trim()}` });
   });
   return found;

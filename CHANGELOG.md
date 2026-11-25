@@ -7,6 +7,8 @@ Versions and release rules: [README.md](README.md#versioning).
 ### Added
 
 - `package-kit-lane` emits strictly-typed `failure_evidence` v1 (`{ version: 1, comparable, context, cases }`) on `failed` check rows so `lanefather check` can classify pre-existing base failures across worktrees, emitting `comparable: false` for timed-out, signal-killed, interrupted, oversized-log, incomplete, or empty-log failures and omitting `failure_evidence` on non-`failed` rows.
+- `package-kit-lane` plans (`planChecks`, `planSmoke`) and verification reports advertise `capabilities: ["base"]` so Lanefather passes `--base <ref>` on scoped lane check runs and their solo reruns (Refs #27).
+- `test-hygiene` `ui-assertion` catches asserted `getAttribute("class")` / `getAttribute('class')` and `.matches(".<class>")` class-pinning evasions while allowing ARIA and data-attribute selectors such as `.matches("[role='button']")` and `.matches("[data-state='open']")` (Refs #27).
 
 ### Fixed
 
