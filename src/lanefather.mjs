@@ -10,7 +10,7 @@ import { buildFailureEvidenceFromFile } from './failure-evidence.mjs';
 import { cleanEnvironment, gitRunner } from './git.mjs';
 import { runVerify, verifySteps } from './verify.mjs';
 import { capacity, hasLease, leaseSelf, verifyLeaseSlots } from './slotfather.mjs';
-import { applyScopeArgs, changedPaths, planChecks, planSmoke } from './plan.mjs';
+import { LANE_CAPABILITIES, applyScopeArgs, changedPaths, planChecks, planSmoke } from './plan.mjs';
 
 export function configuredChecks(config) {
   const suites = ['verify', ...(config.verify.browser ? ['browser'] : [])];
@@ -154,7 +154,7 @@ export async function main(args) {
   const byName = new Map(result.results.map(row => [row.name, row]));
   const report = { v: 1, head, tree, exit: environment ? 1 : result.exit, environment,
     interrupted: result.interrupted,
-    capabilities: ['base'],
+    capabilities: [...LANE_CAPABILITIES],
     checks: steps.map(step => {
       const row = byName.get(step.name);
       const blockedBy = row ? [] : [...step.needs, ...(step.after ?? [])].filter(id => byName.get(id)?.status !== 'ok');

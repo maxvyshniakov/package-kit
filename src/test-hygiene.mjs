@@ -269,32 +269,214 @@ export function callsPerfHelper(file, text) {
 // ---- ui-assertion ----------------------------------------------------------
 
 const CLASS_ASSERTION = /\btoHaveClass\s*\(|\b(?:expect|assert(?:\.\w+)?)\s*\(.*?\.(?:className|classList)\b|\.classList\.contains\s*\([^)]*\)\s*\)?\s*\.(?:toBe|toEqual)|\bassert\w*\s*\([^)]*\.classList\.contains\(/;
-const GET_CLASS_ATTR = /\.getAttribute\s*\(\s*(["'`])class\1\s*\)/;
-const MATCHES_CALL = /\.matches\s*\(\s*(["'`])((?:\\.|(?!\1).)*)\1\s*\)/g;
+const CLASS_ATTR_BLOCK = /^\[\s*class(?:\s*[~|^$*]?=|\s*\])/i;
+const CLASS_SELECTOR = /(?<!\\)(?:\\\\)*\.(?:[A-Za-z_-]|\\)/;
+const REGEX_PREFIX_KEYWORDS = new Set(["return", "throw", "case", "in", "of", "typeof", "void", "delete", "await", "yield", "new", "else", "do"]);
 // A declaration whose value looks like CSS (a var(), a number or unit, a colour, a keyword), not prose such as
 // "warning: deprecated; use x".
 const CSS_TEXT = /(["'`])(?:[^"'`]*?[\s{;])?(?:--)?[a-z]+(?:-[a-z0-9]+)*\s*:\s*(?=[^;"'`]*(?:var\(|\d|#[0-9a-f]{3}|\b(?:none|auto|inherit|initial|transparent|currentColor|solid|flex|grid|block|inline|hidden|absolute|relative|fixed|bold|normal)\b))[^;"'`]+;[^"'`]*\1/i;
 const ASSERTING = /\b(?:expect|assert(?:\.\w+)?)\s*\(|\.to(?:Contain|Match|Be|Equal|Include)\w*\s*\(/;
 
-/** The line without its trailing // comment, keeping string literal contents intact. */
-function withoutJsComment(line) {
-  let quote = null;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === "\\") { i++; continue; }
-      if (c === quote) quote = null;
-      continue;
-    }
-    if (line.startsWith("//", i)) return line.slice(0, i);
-    if (c === '"' || c === "'" || c === "`") quote = c;
-  }
-  return line;
+function unescapeJsChar(c) {
+  if (c === "n") return "\n";
+  if (c === "r") return "\r";
+  if (c === "t") return "\t";
+  return c;
 }
 
-function hasClassSelectorMatch(raw) {
-  for (const [, , selector] of raw.matchAll(MATCHES_CALL)) {
-    if (/\.[A-Za-z_-]/.test(selector.replace(/\[[^\]]*\]/g, ""))) return true;
+/** Reads a quoted JS string starting at `start` (`'` or `"`) in linear time. */
+function scanJsString(line, start) {
+  const quote = line[start];
+  let value = "";
+  let i = start + 1;
+  while (i < line.length) {
+    const c = line[i];
+    if (c === "\\") {
+      if (i + 1 < line.length) value += unescapeJsChar(line[i + 1]);
+      i += 2;
+      continue;
+    }
+    if (c === quote) return { value, next: i + 1 };
+    value += c;
+    i++;
+  }
+  return { value, next: i };
+}
+
+/** Reads a JS template literal starting at `start` (`` ` ``), replacing each `${...}` span with `_`. */
+function scanJsTemplate(line, start) {
+  let value = "";
+  let hasExpr = false;
+  let i = start + 1;
+  while (i < line.length) {
+    const c = line[i];
+    if (c === "\\") {
+      if (i + 1 < line.length) value += unescapeJsChar(line[i + 1]);
+      i += 2;
+      continue;
+    }
+    if (c === "`") return { value, next: i + 1, hasExpr };
+    if (c === "$" && line[i + 1] === "{") {
+      hasExpr = true;
+      value += "_";
+      i += 2;
+      let depth = 1;
+      while (i < line.length && depth > 0) {
+        const ch = line[i];
+        if (ch === "'" || ch === '"') { i = scanJsString(line, i).next; continue; }
+        if (ch === "`") { i = scanJsTemplate(line, i).next; continue; }
+        if (line.startsWith("//", i)) { i = line.length; break; }
+        if (line.startsWith("/*", i)) {
+          const end = line.indexOf("*/", i + 2);
+          i = end === -1 ? line.length : end + 2;
+          continue;
+        }
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        i++;
+      }
+      continue;
+    }
+    value += c;
+    i++;
+  }
+  return { value, next: i, hasExpr };
+}
+
+/** Skips a JS regex literal starting at `start` (`/`), respecting escapes and `[...]` classes. */
+function skipJsRegex(line, start) {
+  let i = start + 1;
+  let inClass = false;
+  while (i < line.length) {
+    const c = line[i];
+    if (c === "\\") { i += 2; continue; }
+    if (inClass) {
+      if (c === "]") inClass = false;
+      i++;
+      continue;
+    }
+    if (c === "[") { inClass = true; i++; continue; }
+    if (c === "/") {
+      i++;
+      while (i < line.length && /[a-z]/i.test(line[i])) i++;
+      return i;
+    }
+    i++;
+  }
+  return i;
+}
+
+/** Whether a CSS selector targets a class (`.foo`, `.\!hidden`, `[class~="foo"]`) outside `[...]` values. */
+function hasClassSelectorMatch(selector) {
+  let stripped = "";
+  for (let i = 0; i < selector.length; i++) {
+    if (selector[i] === "\\") {
+      stripped += selector.slice(i, i + 2);
+      i++;
+      continue;
+    }
+    if (selector[i] !== "[") {
+      stripped += selector[i];
+      continue;
+    }
+    let j = i + 1;
+    let quote = null;
+    while (j < selector.length) {
+      const c = selector[j];
+      if (c === "\\") { j += 2; continue; }
+      if (quote) {
+        if (c === quote) quote = null;
+        j++;
+        continue;
+      }
+      if (c === '"' || c === "'") { quote = c; j++; continue; }
+      if (c === "]") { j++; break; }
+      j++;
+    }
+    if (CLASS_ATTR_BLOCK.test(selector.slice(i, j))) return true;
+    i = j - 1;
+  }
+  return CLASS_SELECTOR.test(stripped);
+}
+
+const skipWs = (line, i) => {
+  while (i < line.length && /\s/.test(line[i])) i++;
+  return i;
+};
+
+/** Single-pass linear JS scanner for `.getAttribute("class")` and `.matches(".<class>")` calls in code. */
+function hasClassDomCall(line) {
+  let i = 0;
+  let prev = "op";
+  while (i < line.length) {
+    const c = line[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (line.startsWith("//", i)) break;
+    if (line.startsWith("/*", i)) {
+      const end = line.indexOf("*/", i + 2);
+      i = end === -1 ? line.length : end + 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      i = scanJsString(line, i).next;
+      prev = "val";
+      continue;
+    }
+    if (c === "`") {
+      i = scanJsTemplate(line, i).next;
+      prev = "val";
+      continue;
+    }
+    if (c === "/" && prev === "op") {
+      i = skipJsRegex(line, i);
+      prev = "val";
+      continue;
+    }
+    if (c === ".") {
+      let j = skipWs(line, i + 1);
+      const idStart = j;
+      while (j < line.length && /[A-Za-z0-9_$]/.test(line[j])) j++;
+      const name = line.slice(idStart, j);
+      if (name === "getAttribute" || name === "matches") {
+        let k = skipWs(line, j);
+        if (line.startsWith("?.", k)) k = skipWs(line, k + 2);
+        if (line[k] === "(") {
+          const argStart = skipWs(line, k + 1);
+          const ch = line[argStart];
+          if (ch === "'" || ch === '"' || ch === "`") {
+            const parsed = ch === "`" ? scanJsTemplate(line, argStart) : scanJsString(line, argStart);
+            const after = skipWs(line, parsed.next);
+            if (name === "getAttribute") {
+              if (!parsed.hasExpr && parsed.value === "class" && line[after] === ")") return true;
+            } else if (line[after] === ")") {
+              if (hasClassSelectorMatch(parsed.value)) return true;
+            } else if (line[after] === "+") {
+              if (parsed.value.startsWith(".") || hasClassSelectorMatch(parsed.value)) return true;
+            }
+            i = after;
+            prev = "val";
+            continue;
+          }
+        }
+      }
+      i = j > idStart ? j : i + 1;
+      prev = j > idStart ? "val" : "op";
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i + 1;
+      while (j < line.length && /[A-Za-z0-9_$]/.test(line[j])) j++;
+      prev = REGEX_PREFIX_KEYWORDS.has(line.slice(i, j)) ? "op" : "val";
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c)) {
+      while (i < line.length && /[0-9a-zA-Z_.]/.test(line[i])) i++;
+      prev = "val";
+      continue;
+    }
+    prev = (c === ")" || c === "]") ? "val" : "op";
+    i++;
   }
   return false;
 }
@@ -302,10 +484,7 @@ function hasClassSelectorMatch(raw) {
 function isClassAssertion(line, stripped) {
   if (CLASS_ASSERTION.test(stripped)) return true;
   if (!ASSERTING.test(stripped)) return false;
-  const uncommented = withoutJsComment(line);
-  if (/\.getAttribute\s*\(/.test(stripped) && GET_CLASS_ATTR.test(uncommented)) return true;
-  if (/\.matches\s*\(/.test(stripped) && hasClassSelectorMatch(uncommented)) return true;
-  return false;
+  return hasClassDomCall(line);
 }
 
 export function uiFindings(file, text) {

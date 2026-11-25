@@ -17,6 +17,8 @@ export function compileGlob(glob, label = "inputs") {
 
 export { createMatcher };
 
+export const LANE_CAPABILITIES = ["base"];
+
 /** Resolves `base` (default HEAD) to a commit SHA in `root`. */
 export function resolveBase(root, base = "HEAD", { env = process.env } = {}) {
   return execFileSync("git", ["rev-parse", "--verify", "--end-of-options", `${base}^{commit}`], {
@@ -100,7 +102,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
       suites: allSuites,
       reasons: Object.fromEntries(allSuites.map(suite => [suite, ["All configured steps are checked."]])),
       checks: checks.map(({ id, suite }) => ({ id, suite, paths: normalizedPaths, producer: false })),
-      capabilities: ["base"],
+      capabilities: [...LANE_CAPABILITIES],
     };
   }
 
@@ -135,7 +137,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
       suites: [],
       reasons: {},
       checks: [],
-      capabilities: ["base"],
+      capabilities: [...LANE_CAPABILITIES],
     };
   }
 
@@ -209,7 +211,7 @@ export function planChecks({ checks, paths = [], inert = [], runner = [], canary
     suites,
     reasons,
     checks: rows,
-    capabilities: ["base"],
+    capabilities: [...LANE_CAPABILITIES],
   };
 }
 
@@ -242,7 +244,7 @@ export function planSmoke(config, { checks, paths = [], plan }) {
     if (tagged.length) targetRefs = tagged;
   }
 
-  if (targetRefs === null) return plan;
+  if (targetRefs === null) return plan.capabilities ? plan : { ...plan, capabilities: [...LANE_CAPABILITIES] };
 
   const targetIds = new Set();
   for (const ref of targetRefs) {
@@ -285,7 +287,7 @@ export function planSmoke(config, { checks, paths = [], plan }) {
     suites,
     reasons,
     checks: rows,
-    capabilities: plan.capabilities ?? ["base"],
+    capabilities: plan.capabilities ? [...plan.capabilities] : [...LANE_CAPABILITIES],
   };
 }
 
@@ -297,10 +299,11 @@ export function planSmoke(config, { checks, paths = [], plan }) {
 export function applyScopeArgs(steps, { paths = [], matchedByName = new Map(), full = false, release = false } = {}) {
   return steps.map(step => {
     if (typeof step.scopeArgs !== "function") return step;
+    const matchedPaths = matchedByName.get(step.name) ?? [];
     const extra = step.scopeArgs({
       paths,
-      matchedPaths: matchedByName.get(step.name) ?? [],
-      full,
+      matchedPaths,
+      full: full || !matchedPaths.length,
       release,
     });
     if (extra === undefined || extra === null) return step;

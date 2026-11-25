@@ -224,6 +224,27 @@ test("applyScopeArgs appends scoped component arguments on partial runs and omit
     full: true,
   });
   assert.deepEqual(full[0].command, ["run", "check:browser", "--", "--no-build"]);
+
+  // A check requested via --checks whose own inputs were not in --base's diff falls back to full: true.
+  let sawFull = null;
+  const fallbackSteps = normalizeSteps([
+    {
+      name: "browser checks",
+      command: ["run", "check:browser", "--", "--no-build"],
+      inputs: ["packages/sid-kit/src/components/**"],
+      scopeArgs: ({ matchedPaths, full: isFull }) => {
+        sawFull = isFull;
+        return isFull ? ["FULL"] : matchedPaths;
+      },
+    },
+  ]);
+  const unmatched = applyScopeArgs(fallbackSteps, {
+    paths: ["packages/sid-kit/src/unrelated.ts"],
+    matchedByName: new Map(),
+    full: false,
+  });
+  assert.equal(sawFull, true);
+  assert.deepEqual(unmatched[0].command, ["run", "check:browser", "--", "--no-build", "FULL"]);
 });
 
 test("cheapTier and runSteps run cheap steps first and stop heavier steps if a cheap step fails", async () => {

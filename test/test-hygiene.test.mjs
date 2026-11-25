@@ -97,25 +97,50 @@ test("UI assertions catch getAttribute('class') and .matches('.<class>') without
     "expect(node.getAttribute('class')).toMatch(/active/);",
     "expect(node.getAttribute(`class`)).toBe('primary');",
     'assert.ok(node?.getAttribute("class")?.includes("open"));',
+    'expect(node.getAttribute?.("class")).toContain("rounded");',
     'expect(node.matches(".foo")).toBe(true);',
     "expect(node.matches('.btn-primary')).toBe(true);",
+    'expect(node.matches?.(".foo")).toBe(true);',
     'assert.ok(node.matches("button.is-active"));',
     "assert.equal(node.matches('[role=\"button\"].is-open'), true);",
+    'expect(node.matches(`.${cls}`)).toBe(true);',
+    'expect(node.matches("." + cls)).toBe(true);',
+    'expect(node.matches(\'[class~="rounded"]\')).toBe(true);',
+    'expect(node.matches(\'[class*="active"]\')).toBe(true);',
+    'expect(node.matches(".\\\\!hidden")).toBe(true);',
     'expect(node.getAttribute("aria-label")).toBe("Close");',
     "expect(node.getAttribute('data-state')).toBe('open');",
     'expect(node.getAttribute("data-class")).toBe("x");',
     'expect(node.matches("[role=\'button\']")).toBe(true);',
     'expect(node.matches("[data-state=\'open\']")).toBe(true);',
     'expect(node.matches("[data-url=\'example.com\']")).toBe(true);',
+    'expect(node.matches("[data-class=\'x\']")).toBe(true);',
+    'expect(node.matches(\'[data-path="items[0].name"]\')).toBe(true);',
+    'expect(node.matches("#user\\\\.name")).toBe(true);',
+    'expect(node.matches(`#${panel.id}`)).toBe(true);',
+    'expect(node.matches(`[data-id="${items[0].id}"]`)).toBe(true);',
+    'expect(node.matches(`[data-k="${`a.${b}`}"]`)).toBe(true);',
     'expect(node.matches(":focus-visible")).toBe(true);',
     '// expect(node.getAttribute("class")).toContain("foo");',
+    'expect(node.matches("[role=\'button\']")).toBe(true); /* .matches(".btn") */',
     'expect(node.matches("[role=\'button\']")).toBe(true); // not .matches(".foo")',
+    'expect(node.matches("[role=\'button\']")).toBe(true, \'replaces .matches(".btn")\');',
     'expect(msg).toContain(\'node.getAttribute("class")\');',
     'expect(msg).toContain(\'node.matches(".foo")\');',
     'const cls = node.getAttribute("class");',
     'const isCard = node.matches(".card");',
   ].join("\n");
-  assert.deepEqual(lines(uiFindings("src/__tests__/evasion.test.tsx", text)), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(
+    lines(uiFindings("src/__tests__/evasion.test.tsx", text)),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  );
+
+  // Linear-time scanning: adversarial backslash run completes immediately without catastrophic backtracking.
+  const redosLine = `expect(node.matches("${"\\\\".repeat(28)}" + x)).toBe(true);`;
+  const started = performance.now();
+  assert.deepEqual(uiFindings("src/__tests__/redos.test.tsx", redosLine), []);
+  // load-tolerant: guards against exponential ReDoS (multi-second hang vs <1 ms linear scan)
+  assert.ok(performance.now() - started < 500, "linear scanner must not backtrack exponentially");
 });
 
 test("globs: ** spans directories, * one segment, braces alternatives", () => {
