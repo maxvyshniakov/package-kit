@@ -99,6 +99,7 @@ exec ${quote(process.execPath)} "$@"`);
   run) shift; printf "verify:bun:%s:%s\\n" "$*" "$SLOTFATHER_LEASE" >> ${quote(log)}; exit $VERIFY_EXIT_CODE ;;
 esac`);
   if (ghToken) executable("gh", `echo ${ghToken}`);
+  else executable("gh", "exit 1");
   if (slotfather) executable("slotfather", `printf "slot:%s\\n" "$*" >> ${quote(log)}
 while [ "$1" != "--" ]; do shift; done
 shift

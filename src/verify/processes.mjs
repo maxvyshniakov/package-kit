@@ -45,7 +45,11 @@ export function stepProcesses(table, roots, members = new Map(), { marked = () =
     found.set(name, tree([root, ...known, ...table.filter(row => row.pgid === root).map(row => row.pid)]));
   }
   const held = new Set([...found.values()].flatMap(pids => [...pids]));
-  const orphans = table.filter(row => row.ppid === 1 && !held.has(row.pid) && !checked.has(row.pid)).map(row => row.pid);
+  const orphanParents = new Set([1]);
+  for (let cursor = byPid.get(process.pid)?.ppid; cursor && !orphanParents.has(cursor); cursor = byPid.get(cursor)?.ppid) {
+    orphanParents.add(cursor);
+  }
+  const orphans = table.filter(row => orphanParents.has(row.ppid) && !held.has(row.pid) && !checked.has(row.pid)).map(row => row.pid);
   for (const pid of orphans) checked.add(pid);
   if (orphans.length && names.size) {
     for (const [pid, name] of marked(orphans)) if (found.has(name)) tree([pid], found.get(name));
