@@ -13,6 +13,7 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ### Fixed
 
+- `release-gate` Chromium compositing probe (`compositingStatus`) fails fast when Chromium dies on a signal, uses `/tmp` when `TMPDIR` is too long for Unix domain sockets, and retries once with `--no-sandbox` on Linux hosts where AppArmor blocks unprivileged user namespaces.
 - `verify` process tracking detects orphaned step daemons reparented to an ancestor subreaper (such as `systemd --user` on Linux) in addition to PID 1, so peak memory accounting and timeout cleanup catch orphaned child daemons on systemd-user hosts.
 - `check-changelogs` fails a release section (`## Unreleased` or `## x.y.z`) that holds the same `### <Heading>` twice, as a `merge=union` merge of two branches that each added `### Added` leaves it, naming the section, the heading and both lines.
 

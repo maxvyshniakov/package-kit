@@ -132,13 +132,28 @@ if (pw) console.log(pw.chromium.executablePath());`;
   return result.stdout.trim() || undefined;
 }
 
-/**
- * Starts `executable` headless and returns DevTools' SystemInfo.getInfo
- * gpu.featureStatus: what this Chromium actually composites with.
- */
-export async function compositingStatus(executable, { timeout = 30_000 } = {}) {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "package-kit-chromium-"));
-  const child = spawn(executable, ["--headless", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+const LINUX_SANDBOX_ERROR = /No usable sandbox|SUID sandbox helper|unprivileged user namespaces/i;
+
+function shortTmpDir(platform = process.platform) {
+  const dir = os.tmpdir();
+  if (platform !== "win32" && dir.length > 40 && fs.existsSync("/tmp")) return "/tmp";
+  return dir;
+}
+
+async function probeCompositing(executable, { timeout = 30_000, platform = process.platform, extraArgs = [] } = {}) {
+  const baseTmp = shortTmpDir(platform);
+  const profile = fs.mkdtempSync(path.join(baseTmp, "package-kit-chromium-"));
+  const spawnEnv = baseTmp !== os.tmpdir() ? { ...process.env, TMPDIR: baseTmp } : process.env;
+  const args = [
+    ...extraArgs,
+    "--headless",
+    "--remote-debugging-port=0",
+    `--user-data-dir=${profile}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "about:blank",
+  ];
+  const child = spawn(executable, args, { stdio: ["ignore", "ignore", "pipe"], env: spawnEnv });
   let stderr = "";
   child.stderr.on("data", chunk => { stderr = (stderr + chunk).slice(-4000); });
   const exited = new Promise(resolve => child.on("close", resolve));
@@ -148,7 +163,10 @@ export async function compositingStatus(executable, { timeout = 30_000 } = {}) {
   try {
     let port;
     while (!port) {
-      if (child.exitCode !== null) throw new Error(`Chromium exited ${child.exitCode}: ${stderr.trim()}`);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        await exited;
+        throw new Error(`Chromium exited ${child.exitCode ?? child.signalCode}: ${stderr.trim()}`);
+      }
       if (Date.now() > deadline) throw new Error(`Chromium did not open DevTools within ${timeout / 1000}s: ${stderr.trim()}`);
       const file = path.join(profile, "DevToolsActivePort");
       if (fs.existsSync(file)) port = fs.readFileSync(file, "utf8").split("\n")[0].trim();
@@ -177,5 +195,23 @@ export async function compositingStatus(executable, { timeout = 30_000 } = {}) {
     await exited;
     clearTimeout(killer);
     fs.rmSync(profile, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Starts `executable` headless and returns DevTools' SystemInfo.getInfo
+ * gpu.featureStatus: what this Chromium actually composites with.
+ * On Linux hosts where AppArmor blocks unprivileged user namespaces,
+ * retries once with `--no-sandbox`.
+ */
+export async function compositingStatus(executable, options = {}) {
+  const { platform = process.platform, extraArgs = [] } = options;
+  try {
+    return await probeCompositing(executable, options);
+  } catch (error) {
+    if (platform === "linux" && !extraArgs.includes("--no-sandbox") && LINUX_SANDBOX_ERROR.test(error.message)) {
+      return await probeCompositing(executable, { ...options, extraArgs: [...extraArgs, "--no-sandbox"] });
+    }
+    throw error;
   }
 }

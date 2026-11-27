@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   SOFTWARE_SWITCHES,
   chromiumExecutables,
+  compositingStatus,
   defaultBrowsersPath,
   shadowBrowsers,
   softwareCompositing,
@@ -94,4 +95,69 @@ test("software compositing is what Chromium reports with the GPU off", () => {
   assert.equal(softwareCompositing({ gpu_compositing: "enabled", rasterization: "enabled" }), false);
   assert.equal(softwareCompositing({}), false);
   assert.equal(softwareCompositing(undefined), false);
+});
+
+const fakeChromiumScript = `#!/usr/bin/env node
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const profileArg = args.find(a => a.startsWith("--user-data-dir="));
+const profile = profileArg ? profileArg.slice("--user-data-dir=".length) : "";
+if (!args.includes("--no-sandbox")) {
+  process.stderr.write("[FATAL:zygote_host_impl_linux.cc:145] No usable sandbox! Ubuntu AppArmor disabled unprivileged user namespaces.\\n");
+  process.kill(process.pid, "SIGTRAP");
+  process.exit(1);
+}
+const server = http.createServer((req, res) => {
+  if (req.url === "/json/version") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ webSocketDebuggerUrl: "ws://127.0.0.1:" + server.address().port + "/devtools/browser" }));
+    return;
+  }
+  res.writeHead(404).end();
+});
+server.on("upgrade", (req, socket) => {
+  const key = req.headers["sec-websocket-key"];
+  const accept = crypto.createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+  socket.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + accept + "\\r\\n\\r\\n");
+  socket.on("data", () => {
+    const payload = Buffer.from(JSON.stringify({ id: 1, result: { gpu: { featureStatus: { gpu_compositing: "disabled_software", rasterization: "disabled_software" } } } }));
+    const header = payload.length < 126
+      ? Buffer.from([0x81, payload.length])
+      : Buffer.from([0x81, 126, (payload.length >> 8) & 0xff, payload.length & 0xff]);
+    socket.write(Buffer.concat([header, payload]));
+  });
+});
+server.listen(0, "127.0.0.1", () => {
+  fs.writeFileSync(path.join(profile, "DevToolsActivePort"), server.address().port + "\\n/devtools/browser\\n");
+});
+process.on("SIGTERM", () => { server.close(); process.exit(0); });
+`;
+
+test("compositingStatus retries once with --no-sandbox on Linux when Chromium dies with a sandbox error", async () => {
+  const dir = tempRepository({ "fake-chrome": fakeChromiumScript });
+  const exe = path.join(dir.root, "fake-chrome");
+  fs.chmodSync(exe, 0o755);
+  try {
+    const status = await compositingStatus(exe, { platform: "linux", timeout: 5000 });
+    assert.equal(softwareCompositing(status), true);
+  } finally {
+    dir.cleanup();
+  }
+});
+
+test("compositingStatus fails fast on signal death without retrying --no-sandbox on non-Linux", async () => {
+  const dir = tempRepository({ "fake-chrome": fakeChromiumScript });
+  const exe = path.join(dir.root, "fake-chrome");
+  fs.chmodSync(exe, 0o755);
+  try {
+    await assert.rejects(
+      compositingStatus(exe, { platform: "darwin", timeout: 5000 }),
+      /Chromium exited (SIGTRAP|1): .*No usable sandbox/,
+    );
+  } finally {
+    dir.cleanup();
+  }
 });
