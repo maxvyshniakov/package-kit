@@ -4,6 +4,8 @@ Versions and release rules: [README.md](README.md#versioning).
 
 ## Unreleased
 
+## 1.1.0 - 2026-11-27
+
 ### Added
 
 - `package-kit publish --prerelease <preid> --dist-tag <tag> [--ref <ref>] [--dry-run]` publishes an immutable prerelease (`X.Y.Z-<preid>.N`) from a captured commit archive under an explicit non-`latest` dist-tag, skipping the release gate and never creating Git tags or mutating the working tree (#20).
